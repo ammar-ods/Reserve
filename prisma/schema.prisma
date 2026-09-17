@@ -1,0 +1,121 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  HOST
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+enum ActionType {
+  CREATE
+  UPDATE
+  CANCEL
+  DELETE
+  LOCK_ACQUIRED
+  LOCK_RELEASED
+  SETTING_UPDATE
+}
+
+model User {
+  id           String      @id @default(uuid())
+  adminId      String      @unique // e.g. "SA-01", "ADM-01", "HOST-01", "HOST-02", "HOST-03"
+  name         String
+  email        String      @unique
+  role         Role        @default(HOST)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  auditLogs    AuditLog[]
+}
+
+model Campsite {
+  id              String        @id @default(uuid())
+  slug            String        @unique // e.g. "pine-ridge", "lakeview-haven", "whispering-woods", "mountain-peak"
+  name            String
+  description     String?
+  dailyCapacity   Int           @default(3) // Hard limit on active reservations sharing any single day
+  iconName        String        @default("Tent")
+  reservations    Reservation[]
+  locks           ActiveLock[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model Reservation {
+  id                String            @id @default(uuid())
+  reservationNumber String            @unique // e.g. "RES-2026-0001"
+  campsiteId        String
+  campsite          Campsite          @relation(fields: [campsiteId], references: [id], onDelete: Cascade)
+  
+  // 7 Data Fields:
+  customerName      String
+  customerPhone     String
+  guestCount        Int               @default(1)
+  rentedTents       Int               @default(0)
+  rentedCars        Int               @default(0)
+  rentedBirds       Int               @default(0)
+  rentedRabbits     Int               @default(0)
+  notes             String?
+
+  startDate         DateTime          // Visit Start Date
+  endDate           DateTime          // Visit End Date
+  status            ReservationStatus @default(PENDING)
+  
+  createdByAdminId  String            // Host Admin ID who took the phone call
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([campsiteId, startDate, endDate])
+  @@index([status])
+}
+
+model ActiveLock {
+  id          String   @id @default(uuid())
+  campsiteId  String
+  campsite    Campsite @relation(fields: [campsiteId], references: [id], onDelete: Cascade)
+  hostAdminId String  // e.g. "HOST-01"
+  hostName    String
+  startDate   DateTime
+  endDate     DateTime
+  expiresAt   DateTime // TTL for temporary lock
+  createdAt   DateTime @default(now())
+
+  @@index([campsiteId, expiresAt])
+}
+
+model AuditLog {
+  id           String     @id @default(uuid())
+  action       ActionType
+  adminId      String     // Host Admin ID
+  userRole     Role
+  userName     String
+  targetType   String     // "RESERVATION", "CAMPSITE", "LOCK", "SETTINGS"
+  targetId     String?
+  campsiteName String?
+  details      String     // Description of payload or changes
+  timestamp    DateTime   @default(now())
+
+  user         User?      @relation(fields: [adminId], references: [adminId])
+
+  @@index([timestamp(sort: Desc)])
+}
+
+model SystemSetting {
+  id          String   @id @default("global_config")
+  pageTitle   String   @default("Reserve - Campsite Management")
+  tableHeaders Json    // Customizable column labels editable by Admin
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+}
