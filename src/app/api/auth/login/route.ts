@@ -13,10 +13,24 @@ export async function POST(request: NextRequest) {
     if (!username || !password) {
       return NextResponse.json({ success: false, error: 'MISSING_CREDENTIALS' }, { status: 400 });
     }
-
-    const user = await prisma.user.findUnique({
-      where: { username: username.toLowerCase() },
-    });
+// TEMPORARY BYPASS START
+//    return NextResponse.json({
+  //    success: true,
+    //  user: {
+      //  id: "temp-admin-id",
+       // adminId: "SA2026",
+       // username: "superadmin",
+       // name: "Super Admin",
+       // role: "ADMIN"
+     // }
+   // });
+    // TEMPORARY BYPASS END
+   // const user = await prisma.user.findUnique({
+  //    where: { username: username.toLowerCase() },
+  //  });
+  const user = await prisma.user.findFirst({
+  where: { username: username.toLowerCase() },
+  });
 
     if (!user || !user.isActive || !verifyPassword(password, user.passwordHash)) {
       return NextResponse.json({ success: false, error: 'INVALID_CREDENTIALS' }, { status: 401 });

@@ -1,7 +1,9 @@
 {
   "scripts": {
-  "build": "prisma generate && next build"
-  },
+  "dev": "next dev",
+  "build": "prisma generate && next build",
+  "start": "next start"
+},
   "name": "reserve-campsite-system",
   "version": "1.0.0",
   "private": true,
