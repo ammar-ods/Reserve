@@ -3,12 +3,17 @@
 import { useState, useEffect, useCallback, use } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, ArrowLeft, Trees, Waves, Compass, Mountain, Tent, Sliders } from 'lucide-react';
+import { Plus, ArrowLeft, Sliders } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import StatsBar from '@/components/StatsBar';
 import ReservationTable from '@/components/ReservationTable';
 import BookingModal from '@/components/BookingModal';
+import ConfirmDepositModal from '@/components/ConfirmDepositModal';
 import AdminSettingsModal from '@/components/AdminSettingsModal';
+import CampsiteIcon from '@/components/CampsiteIcon';
+import { useLang } from '@/components/LanguageProvider';
+import { DEFAULT_SETTINGS, DEFAULT_STATS } from '@/lib/defaults';
+import { translateError } from '@/lib/i18n';
 import {
   CampsiteDTO,
   ReservationDTO,
@@ -16,17 +21,7 @@ import {
   SystemSettingsDTO,
   UserSession,
   ActiveLockDTO,
-  ReservationStatus,
-  RealtimeEvent,
 } from '@/lib/types';
-
-const ICON_MAP: Record<string, React.ReactNode> = {
-  Trees: <Trees size={26} />,
-  Waves: <Waves size={26} />,
-  Compass: <Compass size={26} />,
-  Mountain: <Mountain size={26} />,
-  Tent: <Tent size={26} />,
-};
 
 export default function SiteDetailsPage({
   params,
@@ -35,43 +30,23 @@ export default function SiteDetailsPage({
 }) {
   const { slug } = use(params);
   const router = useRouter();
+  const { t, lang } = useLang();
 
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
   const [campsite, setCampsite] = useState<CampsiteDTO | null>(null);
   const [allCampsites, setAllCampsites] = useState<CampsiteDTO[]>([]);
   const [reservations, setReservations] = useState<ReservationDTO[]>([]);
   const [activeLocks, setActiveLocks] = useState<ActiveLockDTO[]>([]);
-  const [stats, setStats] = useState<StatsData>({
-    totalActiveReservations: 0,
-    totalGuests: 0,
-    rentedCars: 0,
-    rentedTents: 0,
-    rentedBirds: 0,
-    rentedRabbits: 0,
-    pendingCount: 0,
-    confirmedCount: 0,
-    cancelledCount: 0,
-  });
-  const [settings, setSettings] = useState<SystemSettingsDTO>({
-    id: 'global_config',
-    pageTitle: 'Reserve - Campsite Management',
-    tableHeaders: {
-      colId: 'Reservation ID',
-      colCustomer: 'Customer / Contact',
-      colDates: 'Visit Dates',
-      colGuests: 'Guests',
-      colGear: 'Rented Gear & Pets',
-      colStatus: 'Booking Status',
-      colHost: 'Host (Admin ID)',
-      colActions: 'Actions',
-    },
-    updatedAt: new Date().toISOString(),
-  });
+  const [stats, setStats] = useState<StatsData>(DEFAULT_STATS);
+  const [settings, setSettings] = useState<SystemSettingsDTO>(DEFAULT_SETTINGS);
 
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [editingReservation, setEditingReservation] = useState<ReservationDTO | null>(null);
+  const [confirmingReservation, setConfirmingReservation] = useState<ReservationDTO | null>(null);
   const [isAdminSettingsOpen, setIsAdminSettingsOpen] = useState(false);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Authenticate user
   useEffect(() => {
@@ -104,7 +79,6 @@ export default function SiteDetailsPage({
         if (match) {
           setCampsite(match);
 
-          // Fetch reservations and locks for this specific site
           const [resRes, locksRes] = await Promise.all([
             fetch(`/api/reservations?campsiteId=${match.id}`),
             fetch(`/api/locks?campsiteId=${match.id}`),
@@ -150,14 +124,8 @@ export default function SiteDetailsPage({
       setIsRealtimeConnected(true);
     };
 
-    eventSource.addEventListener('message', (event) => {
-      try {
-        const parsed: RealtimeEvent = JSON.parse(event.data);
-        // Refresh site data when any lock or reservation or settings change occurs
-        loadSiteData();
-      } catch (e) {
-        console.error('SSE parse error:', e);
-      }
+    eventSource.addEventListener('message', () => {
+      loadSiteData();
     });
 
     eventSource.onerror = () => {
@@ -169,27 +137,30 @@ export default function SiteDetailsPage({
     };
   }, [currentUser, loadSiteData]);
 
-  // Update Status (Confirmed / Cancelled / Pending)
-  const handleStatusChange = async (id: string, newStatus: ReservationStatus) => {
-    if (!currentUser) return;
+  const patchReservation = async (id: string, payload: Record<string, unknown>) => {
+    if (!currentUser) return false;
+    setActionError(null);
     try {
       const res = await fetch(`/api/reservations/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status: newStatus,
+          ...payload,
           adminId: currentUser.adminId,
           userName: currentUser.name,
+          requesterRole: currentUser.role,
         }),
       });
       const data = await res.json();
       if (data.success) {
         loadSiteData();
-      } else {
-        alert(data.error || 'Failed to update reservation status');
+        return true;
       }
-    } catch (e) {
-      console.error('Failed to update status:', e);
+      setActionError(translateError(data.error, lang, { date: data.congestedDate || '' }));
+      return false;
+    } catch {
+      setActionError(t('common.networkError'));
+      return false;
     }
   };
 
@@ -198,26 +169,23 @@ export default function SiteDetailsPage({
       <div className="app-container">
         <Navbar currentUser={currentUser} />
         <main className="main-content" style={{ textAlign: 'center', padding: '4rem 1rem' }}>
-          <p style={{ color: 'var(--text-muted)' }}>Loading campsite details...</p>
+          <p style={{ color: 'var(--text-muted)' }}>{t('site.loading')}</p>
         </main>
       </div>
     );
   }
 
-  const icon = ICON_MAP[campsite.iconName] || <Tent size={26} />;
   const isAdminOrSuper = currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN';
 
   return (
     <div className="app-container">
       <Navbar
         currentUser={currentUser}
-        onUserChange={(u) => setCurrentUser(u)}
         onOpenAdminSettings={() => setIsAdminSettingsOpen(true)}
         isRealtimeConnected={isRealtimeConnected}
       />
 
       <main className="main-content">
-        {/* Breadcrumb & Site Header */}
         <div style={{ marginBottom: '1.5rem' }}>
           <Link
             href="/dashboard"
@@ -231,109 +199,121 @@ export default function SiteDetailsPage({
               fontWeight: 500,
             }}
           >
-            <ArrowLeft size={16} /> Back to All Campsites
+            <ArrowLeft size={16} className="dir-flip" /> {t('site.back')}
           </Link>
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <div className="campsite-logo">{icon}</div>
-              <div>
-                <h1 style={{ fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
-                  {campsite.name}
-                </h1>
-                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                  {campsite.description}
-                </p>
+              <div className="campsite-logo">
+                <CampsiteIcon name={campsite.iconName} />
               </div>
+              <h1 style={{ fontSize: '1.65rem', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
+                {campsite.name}
+              </h1>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span
-                style={{
-                  fontSize: '0.85rem',
-                  fontWeight: 700,
-                  padding: '0.35rem 0.75rem',
-                  borderRadius: 'var(--radius-full)',
-                  background: 'var(--bg-surface-subtle)',
-                  border: '1px solid var(--border-color)',
-                  color: 'var(--text-primary)',
-                }}
-              >
-                Daily Cap Limit: <strong>{campsite.dailyCapacity}</strong>/day
-              </span>
-
               {isAdminOrSuper && (
-                <button
-                  onClick={() => setIsAdminSettingsOpen(true)}
-                  className="btn btn-secondary btn-sm"
-                  title="Admin: Edit table headers or site daily capacity"
-                >
-                  <Sliders size={15} />
-                  <span>Edit Cap / Headers</span>
-                </button>
+                <>
+                  <span className="campsite-capacity-badge">
+                    {t('card.cap')}: <strong>{campsite.dailyCapacity}</strong>
+                  </span>
+                  <button onClick={() => setIsAdminSettingsOpen(true)} className="btn btn-secondary btn-sm">
+                    <Sliders size={15} />
+                    <span>{t('site.settings')}</span>
+                  </button>
+                </>
               )}
 
               <button
-                onClick={() => setIsBookingModalOpen(true)}
+                onClick={() => {
+                  setEditingReservation(null);
+                  setIsBookingModalOpen(true);
+                }}
                 className="btn btn-primary"
               >
                 <Plus size={18} />
-                <span>New Booking</span>
+                <span>{t('site.newBooking')}</span>
               </button>
             </div>
           </div>
         </div>
 
-        {/* Top: Site-Specific Stats Bar */}
-        <StatsBar stats={stats} title={`Live Stats for ${campsite.name}`} />
+        <StatsBar stats={stats} title={t('stats.site')} />
 
-        {/* Middle: Data Table of Reservations */}
         <div style={{ marginBottom: '4rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              Reservations ({reservations.length})
-            </h2>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Sorted by Visit Date • Real-time synchronized
-            </span>
-          </div>
+          <h2 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+            {t('site.reservations')} ({reservations.length})
+          </h2>
+
+          {actionError && (
+            <div className="alert alert-error">
+              <span>{actionError}</span>
+            </div>
+          )}
 
           <ReservationTable
             reservations={reservations}
             headers={settings.tableHeaders}
             siteName={campsite.name}
             currentUser={currentUser}
-            onStatusChange={handleStatusChange}
+            onConfirmRequest={(res) => setConfirmingReservation(res)}
+            onCancel={async (res) => {
+              await patchReservation(res.id, { status: 'CANCELLED' });
+            }}
+            onEdit={(res) => {
+              setEditingReservation(res);
+              setIsBookingModalOpen(true);
+            }}
           />
         </div>
       </main>
 
-      {/* Floating '+' Action Button */}
       <button
-        onClick={() => setIsBookingModalOpen(true)}
+        onClick={() => {
+          setEditingReservation(null);
+          setIsBookingModalOpen(true);
+        }}
         className="floating-add-btn"
-        title="Add New Reservation (Real-Time Lock)"
-        aria-label="Add New Reservation"
+        title={t('site.newBooking')}
+        aria-label={t('site.newBooking')}
       >
         <Plus size={28} />
       </button>
 
-      {/* 2-Step Booking Modal */}
       {isBookingModalOpen && (
         <BookingModal
           isOpen={isBookingModalOpen}
-          onClose={() => setIsBookingModalOpen(false)}
+          onClose={() => {
+            setIsBookingModalOpen(false);
+            setEditingReservation(null);
+          }}
           campsite={campsite}
           currentUser={currentUser}
           activeLocks={activeLocks}
           existingReservations={reservations}
-          onReservationCreated={() => {
+          prices={settings}
+          reservation={editingReservation}
+          onSaved={() => {
             loadSiteData();
           }}
         />
       )}
 
-      {/* Admin Settings Modal */}
+      {confirmingReservation && (
+        <ConfirmDepositModal
+          reservation={confirmingReservation}
+          onClose={() => setConfirmingReservation(null)}
+          onConfirm={async (depositAmount) => {
+            const ok = await patchReservation(confirmingReservation.id, {
+              status: 'CONFIRMED',
+              depositAmount,
+            });
+            if (ok) setConfirmingReservation(null);
+          }}
+        />
+      )}
+
       {isAdminSettingsOpen && (
         <AdminSettingsModal
           isOpen={isAdminSettingsOpen}
@@ -346,9 +326,7 @@ export default function SiteDetailsPage({
             if (campsite.id === id) {
               setCampsite({ ...campsite, dailyCapacity: newCap });
             }
-            setAllCampsites((prev) =>
-              prev.map((c) => (c.id === id ? { ...c, dailyCapacity: newCap } : c))
-            );
+            setAllCampsites((prev) => prev.map((c) => (c.id === id ? { ...c, dailyCapacity: newCap } : c)));
           }}
         />
       )}

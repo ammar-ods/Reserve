@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { broadcastRealtimeEvent, checkCapacityAvailability, releaseLock } from '@/lib/realtime';
-import { logAuditAction } from '@/lib/audit';
+import { buildCreationSnapshot, logAuditAction } from '@/lib/audit';
+import { getSystemSettings, pricesOf } from '@/lib/settings';
+import { calculateTotal } from '@/lib/pricing';
 import { ActionType, ReservationStatus } from '@prisma/client';
+import { CountryCount } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +43,6 @@ export async function GET(request: NextRequest) {
 
     // Calculate live stats for both previous and current/upcoming reservations (PENDING + CONFIRMED)
     // Cancelled are excluded from stats per spec
-    const now = new Date();
     const allReserved = await prisma.reservation.findMany({
       where: {
         ...(campsiteId ? { campsiteId } : {}),
@@ -49,11 +51,14 @@ export async function GET(request: NextRequest) {
       select: {
         startDate: true,
         endDate: true,
+        country: true,
         guestCount: true,
         rentedCars: true,
         rentedTents: true,
         rentedBirds: true,
         rentedRabbits: true,
+        totalAmount: true,
+        depositAmount: true,
         status: true,
       },
     });
@@ -65,11 +70,17 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    const pastReservations = allReserved.filter((r) => new Date(r.endDate) < now);
-    const currentOrUpcoming = allReserved.filter((r) => new Date(r.endDate) >= now);
+    // Visitor nationalities, ordered by how many bookings each country holds
+    const countryTally = new Map<string, number>();
+    allReserved.forEach((r) => {
+      const code = r.country || 'SA';
+      countryTally.set(code, (countryTally.get(code) || 0) + 1);
+    });
+    const countryCounts: CountryCount[] = [...countryTally.entries()]
+      .map(([code, count]) => ({ code, count }))
+      .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
 
     const stats = {
-      // Total combined count across both previous and current/upcoming reservations
       totalActiveReservations: allReserved.length,
       totalGuests: allReserved.reduce((acc, r) => acc + (r.guestCount || 0), 0),
       rentedCars: allReserved.reduce((acc, r) => acc + (r.rentedCars || 0), 0),
@@ -79,8 +90,9 @@ export async function GET(request: NextRequest) {
       pendingCount: allReserved.filter((r) => r.status === 'PENDING').length,
       confirmedCount: allReserved.filter((r) => r.status === 'CONFIRMED').length,
       cancelledCount,
-      pastCount: pastReservations.length,
-      upcomingCount: currentOrUpcoming.length,
+      totalAmount: allReserved.reduce((acc, r) => acc + (r.totalAmount || 0), 0),
+      totalDeposits: allReserved.reduce((acc, r) => acc + (r.depositAmount || 0), 0),
+      countryCounts,
     };
 
     return NextResponse.json({
@@ -107,41 +119,49 @@ export async function POST(request: NextRequest) {
       campsiteId,
       customerName,
       customerPhone,
+      country = 'SA',
       guestCount = 1,
       rentedTents = 0,
       rentedCars = 0,
       rentedBirds = 0,
       rentedRabbits = 0,
       notes = '',
+      depositAmount,
       startDate,
       endDate,
-      status = 'PENDING',
       createdByAdminId,
       hostName,
     } = body;
 
     if (!campsiteId || !customerName || !customerPhone || !startDate || !endDate || !createdByAdminId) {
-      return NextResponse.json(
-        { success: false, error: 'Missing required reservation fields' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'MISSING_FIELDS' }, { status: 400 });
     }
 
     const start = new Date(startDate);
     const end = new Date(endDate);
 
     if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid dates. End date must be strictly after start date.' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'INVALID_DATES' }, { status: 400 });
     }
 
     // Verify capacity limit before committing (excludes current host's lock so their own held slot is honored)
     const check = await checkCapacityAvailability(campsiteId, start, end, createdByAdminId);
     if (!check.available) {
-      return NextResponse.json({ success: false, error: check.reason }, { status: 409 });
+      return NextResponse.json(
+        { success: false, error: 'CAPACITY_REACHED', congestedDate: check.congestedDate },
+        { status: 409 }
+      );
     }
+
+    const counts = {
+      rentedTents: Number(rentedTents) || 0,
+      rentedCars: Number(rentedCars) || 0,
+      rentedBirds: Number(rentedBirds) || 0,
+      rentedRabbits: Number(rentedRabbits) || 0,
+    };
+
+    const settings = await getSystemSettings();
+    const totalAmount = calculateTotal(counts, pricesOf(settings));
 
     // Generate unique sequential reservation number
     const count = await prisma.reservation.count();
@@ -153,15 +173,20 @@ export async function POST(request: NextRequest) {
         campsiteId,
         customerName,
         customerPhone,
+        country: String(country || 'SA').toUpperCase(),
         guestCount: Number(guestCount) || 1,
-        rentedTents: Number(rentedTents) || 0,
-        rentedCars: Number(rentedCars) || 0,
-        rentedBirds: Number(rentedBirds) || 0,
-        rentedRabbits: Number(rentedRabbits) || 0,
+        ...counts,
         notes,
+        totalAmount,
+        // A deposit agreed on the call stays informational: the booking is only
+        // confirmed once the money actually lands.
+        depositAmount:
+          depositAmount === undefined || depositAmount === null || depositAmount === ''
+            ? null
+            : Math.max(0, Number(depositAmount) || 0),
         startDate: start,
         endDate: end,
-        status: status as ReservationStatus,
+        status: ReservationStatus.PENDING,
         createdByAdminId,
       },
       include: {
@@ -174,15 +199,31 @@ export async function POST(request: NextRequest) {
     // Release the temporary lock held by this host
     await releaseLock(campsiteId, createdByAdminId);
 
-    // Audit log entry
     await logAuditAction({
       action: ActionType.CREATE,
       adminId: createdByAdminId,
       userName: hostName || createdByAdminId,
       targetType: 'RESERVATION',
       targetId: reservation.id,
+      targetLabel: `${reservationNumber} · ${reservation.customerName}`,
       campsiteName: reservation.campsite.name,
-      details: `Created reservation ${reservationNumber} for ${customerName} (${start.toISOString().split('T')[0]} to ${end.toISOString().split('T')[0]}). Status: ${status}`,
+      details: `إضافة حجز جديد ${reservationNumber} للزائر ${reservation.customerName}`,
+      changes: buildCreationSnapshot(reservation as unknown as Record<string, unknown>, [
+        'customerName',
+        'customerPhone',
+        'country',
+        'guestCount',
+        'startDate',
+        'endDate',
+        'rentedTents',
+        'rentedCars',
+        'rentedBirds',
+        'rentedRabbits',
+        'totalAmount',
+        'depositAmount',
+        'notes',
+        'status',
+      ]),
     });
 
     const formattedRes = {

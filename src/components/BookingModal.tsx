@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   format,
   addMonths,
@@ -17,7 +17,11 @@ import {
   addDays,
 } from 'date-fns';
 import { X, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Lock, Check, AlertCircle } from 'lucide-react';
-import { CampsiteDTO, UserSession, ActiveLockDTO, ReservationDTO } from '@/lib/types';
+import { useLang } from './LanguageProvider';
+import { formatMoney, translateError } from '@/lib/i18n';
+import { calculateTotal } from '@/lib/pricing';
+import { COUNTRIES, GCC_COUNTRY_CODES, countryFlag } from '@/lib/countries';
+import { CampsiteDTO, UserSession, ActiveLockDTO, ReservationDTO, ItemPrices } from '@/lib/types';
 
 interface BookingModalProps {
   isOpen: boolean;
@@ -26,7 +30,10 @@ interface BookingModalProps {
   currentUser: UserSession | null;
   activeLocks: ActiveLockDTO[];
   existingReservations: ReservationDTO[];
-  onReservationCreated: (res: ReservationDTO) => void;
+  prices: ItemPrices;
+  // When provided the modal edits that booking instead of creating a new one.
+  reservation?: ReservationDTO | null;
+  onSaved: (res: ReservationDTO) => void;
 }
 
 export default function BookingModal({
@@ -36,8 +43,13 @@ export default function BookingModal({
   currentUser,
   activeLocks,
   existingReservations,
-  onReservationCreated,
+  prices,
+  reservation = null,
+  onSaved,
 }: BookingModalProps) {
+  const { t, lang, dateLocale } = useLang();
+  const isEditMode = Boolean(reservation);
+
   const [step, setStep] = useState<1 | 2>(1);
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
@@ -48,41 +60,71 @@ export default function BookingModal({
   const [lockAcquired, setLockAcquired] = useState(false);
   const [lockError, setLockError] = useState<string | null>(null);
 
-  // Step 2: All 7 Fields
+  // Step 2: Booking fields
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [country, setCountry] = useState('SA');
   const [guestCount, setGuestCount] = useState<number>(2);
-  const [rentedTents, setRentedTents] = useState<number>(1);
-  const [rentedCars, setRentedCars] = useState<number>(1);
+  const [rentedTents, setRentedTents] = useState<number>(0);
+  const [rentedCars, setRentedCars] = useState<number>(0);
   const [rentedBirds, setRentedBirds] = useState<number>(0);
   const [rentedRabbits, setRentedRabbits] = useState<number>(0);
+  const [depositAmount, setDepositAmount] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Reset modal state when opening
+  // Load the booking being edited, or reset for a fresh booking
   useEffect(() => {
-    if (isOpen) {
-      setStep(1);
-      setStartDate(null);
-      setEndDate(null);
-      setLockAcquired(false);
-      setLockError(null);
-      setSaveError(null);
-      setCustomerName('');
-      setCustomerPhone('');
-      setGuestCount(2);
-      setRentedTents(1);
-      setRentedCars(1);
-      setRentedBirds(0);
-      setRentedRabbits(0);
-      setNotes('');
+    if (!isOpen) return;
+
+    setLockError(null);
+    setSaveError(null);
+
+    if (reservation) {
+      setStep(2);
+      setStartDate(new Date(reservation.startDate));
+      setEndDate(new Date(reservation.endDate));
+      setCurrentMonth(new Date(reservation.startDate));
+      setLockAcquired(true);
+      setCustomerName(reservation.customerName);
+      setCustomerPhone(reservation.customerPhone);
+      setCountry(reservation.country || 'SA');
+      setGuestCount(reservation.guestCount);
+      setRentedTents(reservation.rentedTents);
+      setRentedCars(reservation.rentedCars);
+      setRentedBirds(reservation.rentedBirds);
+      setRentedRabbits(reservation.rentedRabbits);
+      setDepositAmount(reservation.depositAmount === null ? '' : String(reservation.depositAmount));
+      setNotes(reservation.notes || '');
+      return;
     }
-  }, [isOpen]);
+
+    setStep(1);
+    setStartDate(null);
+    setEndDate(null);
+    setCurrentMonth(new Date());
+    setLockAcquired(false);
+    setCustomerName('');
+    setCustomerPhone('');
+    setCountry('SA');
+    setGuestCount(2);
+    setRentedTents(0);
+    setRentedCars(0);
+    setRentedBirds(0);
+    setRentedRabbits(0);
+    setDepositAmount('');
+    setNotes('');
+  }, [isOpen, reservation]);
+
+  const total = useMemo(
+    () => calculateTotal({ rentedTents, rentedCars, rentedBirds, rentedRabbits }, prices),
+    [rentedTents, rentedCars, rentedBirds, rentedRabbits, prices]
+  );
 
   // Clean up lock if user closes modal
   const handleCancelAndRelease = async () => {
-    if (lockAcquired && currentUser) {
+    if (!isEditMode && lockAcquired && currentUser) {
       try {
         await fetch('/api/locks/release', {
           method: 'POST',
@@ -103,15 +145,16 @@ export default function BookingModal({
   const getDayAvailability = (day: Date) => {
     const today = startOfDay(new Date());
     if (isBefore(day, today)) {
-      return { available: false, count: 0, reason: 'Past date' };
+      return { available: false, count: 0, reason: t('booking.pastDate') };
     }
 
     const dayStart = startOfDay(day);
     const dayEnd = addDays(dayStart, 1);
 
-    // Active reservations overlapping this day
+    // Active reservations overlapping this day (the edited booking never blocks itself)
     const resCount = existingReservations.filter((r) => {
       if (r.status === 'CANCELLED') return false;
+      if (reservation && r.id === reservation.id) return false;
       const rStart = new Date(r.startDate);
       const rEnd = new Date(r.endDate);
       return rStart < dayEnd && rEnd > dayStart;
@@ -130,11 +173,10 @@ export default function BookingModal({
     const cap = campsite.dailyCapacity;
 
     if (totalOccupied >= cap) {
-      const lockHolder = otherLocks[0]?.hostName || otherLocks[0]?.hostAdminId;
       return {
         available: false,
         count: totalOccupied,
-        reason: lockCount > 0 ? `Held by ${lockHolder}` : `Capacity full (${totalOccupied}/${cap})`,
+        reason: lockCount > 0 ? t('booking.heldByOther') : t('booking.capacityFull'),
         isLockedByOther: lockCount > 0,
       };
     }
@@ -155,112 +197,121 @@ export default function BookingModal({
       // Starting fresh selection
       setStartDate(day);
       setEndDate(null);
-      setLockAcquired(false);
+      if (!isEditMode) setLockAcquired(false);
       setLockError(null);
-    } else {
-      // Selecting end date
-      if (isBefore(day, startDate) || isSameDay(day, startDate)) {
-        // If clicked on or before start, make it the new start date
-        setStartDate(day);
-        setEndDate(null);
+      return;
+    }
+
+    // Selecting end date
+    if (isBefore(day, startDate) || isSameDay(day, startDate)) {
+      setStartDate(day);
+      setEndDate(null);
+      return;
+    }
+
+    // Check if all dates in between are available
+    let curr = new Date(startDate);
+    while (curr < day) {
+      const check = getDayAvailability(curr);
+      if (!check.available) {
+        setLockError(`${format(curr, 'dd MMM', { locale: dateLocale })}: ${check.reason}`);
         return;
       }
+      curr = addDays(curr, 1);
+    }
 
-      // Check if all dates in between are available
-      let curr = new Date(startDate);
-      let rangeBlocked = false;
-      while (curr < day) {
-        const check = getDayAvailability(curr);
-        if (!check.available) {
-          rangeBlocked = true;
-          setLockError(`Date ${format(curr, 'MMM dd')} is not available: ${check.reason}`);
-          break;
-        }
-        curr = addDays(curr, 1);
+    setEndDate(day);
+
+    // An existing booking already owns its dates, so no temporary hold is needed.
+    if (isEditMode || !currentUser) return;
+
+    setIsLocking(true);
+    setLockError(null);
+    try {
+      const res = await fetch('/api/locks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campsiteId: campsite.id,
+          startDate: startDate.toISOString(),
+          endDate: day.toISOString(),
+          hostAdminId: currentUser.adminId,
+          hostName: currentUser.name,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setLockAcquired(true);
+      } else {
+        setLockError(translateError(data.error, lang, { date: data.congestedDate || '' }));
+        setLockAcquired(false);
       }
-
-      if (rangeBlocked) return;
-
-      setEndDate(day);
-
-      // Trigger Real-Time Lock immediately per specification
-      if (currentUser) {
-        setIsLocking(true);
-        setLockError(null);
-        try {
-          const res = await fetch('/api/locks', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              campsiteId: campsite.id,
-              startDate: startDate.toISOString(),
-              endDate: day.toISOString(),
-              hostAdminId: currentUser.adminId,
-              hostName: currentUser.name,
-            }),
-          });
-          const data = await res.json();
-          if (data.success) {
-            setLockAcquired(true);
-          } else {
-            setLockError(data.error || 'Failed to acquire temporary hold on dates.');
-            setLockAcquired(false);
-          }
-        } catch (e: unknown) {
-          const message = e instanceof Error ? e.message : 'Network error';
-          setLockError(message);
-        } finally {
-          setIsLocking(false);
-        }
-      }
+    } catch {
+      setLockError(t('common.networkError'));
+    } finally {
+      setIsLocking(false);
     }
   };
 
-  // Save Reservation (Step 2)
-  const handleSaveReservation = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!startDate || !endDate || !currentUser) return;
 
     if (!customerName.trim() || !customerPhone.trim()) {
-      setSaveError('Please enter customer name and phone number.');
+      setSaveError(t('booking.nameRequired'));
       return;
     }
 
     setIsSaving(true);
     setSaveError(null);
 
+    const payload = {
+      customerName: customerName.trim(),
+      customerPhone: customerPhone.trim(),
+      country,
+      guestCount: Number(guestCount),
+      rentedTents: Number(rentedTents),
+      rentedCars: Number(rentedCars),
+      rentedBirds: Number(rentedBirds),
+      rentedRabbits: Number(rentedRabbits),
+      notes: notes.trim(),
+      depositAmount: depositAmount === '' ? null : Number(depositAmount),
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+    };
+
     try {
-      const res = await fetch('/api/reservations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          campsiteId: campsite.id,
-          customerName: customerName.trim(),
-          customerPhone: customerPhone.trim(),
-          guestCount: Number(guestCount),
-          rentedTents: Number(rentedTents),
-          rentedCars: Number(rentedCars),
-          rentedBirds: Number(rentedBirds),
-          rentedRabbits: Number(rentedRabbits),
-          notes: notes.trim(),
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString(),
-          status: 'PENDING',
-          createdByAdminId: currentUser.adminId,
-          hostName: currentUser.name,
-        }),
-      });
+      const res = isEditMode
+        ? await fetch(`/api/reservations/${reservation!.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...payload,
+              adminId: currentUser.adminId,
+              userName: currentUser.name,
+              requesterRole: currentUser.role,
+            }),
+          })
+        : await fetch('/api/reservations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...payload,
+              campsiteId: campsite.id,
+              createdByAdminId: currentUser.adminId,
+              hostName: currentUser.name,
+            }),
+          });
 
       const data = await res.json();
       if (data.success) {
-        onReservationCreated(data.reservation);
+        onSaved(data.reservation);
         onClose();
       } else {
-        setSaveError(data.error || 'Failed to create reservation.');
+        setSaveError(translateError(data.error, lang, { date: data.congestedDate || '' }));
       }
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Network error';
-      setSaveError(message);
+    } catch {
+      setSaveError(t('common.networkError'));
     } finally {
       setIsSaving(false);
     }
@@ -274,18 +325,22 @@ export default function BookingModal({
   const calendarStart = startOfWeek(monthStart);
   const calendarEnd = endOfWeek(monthEnd);
   const calendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+  const weekDays = eachDayOfInterval({ start: calendarStart, end: addDays(calendarStart, 6) });
+
+  const gccCountries = COUNTRIES.filter((c) => GCC_COUNTRY_CODES.includes(c.code));
+  const otherCountries = COUNTRIES.filter((c) => !GCC_COUNTRY_CODES.includes(c.code));
 
   return (
     <div className="modal-overlay">
       <div className="modal-content">
-        {/* Modal Header */}
         <div className="modal-header">
           <div>
             <h3 className="modal-title">
-              {step === 1 ? 'Step 1: Select Booking Dates' : 'Step 2: Reservation Details (All 7 Fields)'}
+              {isEditMode ? t('booking.edit') : step === 1 ? t('booking.step1') : t('booking.step2')}
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              Booking for <strong>{campsite.name}</strong> • Daily Cap: {campsite.dailyCapacity}
+              {t('booking.in')} <strong>{campsite.name}</strong>
+              {isEditMode && ` · ${reservation!.reservationNumber}`}
             </p>
           </div>
           <button onClick={handleCancelAndRelease} style={{ color: 'var(--text-muted)' }}>
@@ -296,34 +351,27 @@ export default function BookingModal({
         {/* STEP 1: CALENDAR VIEW */}
         {step === 1 && (
           <div className="modal-body">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'between', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <CalendarIcon size={18} style={{ color: 'var(--primary)' }} />
                 <span style={{ fontWeight: 700, fontSize: '1.05rem' }}>
-                  {format(currentMonth, 'MMMM yyyy')}
+                  {format(currentMonth, 'MMMM yyyy', { locale: dateLocale })}
                 </span>
               </div>
-              <div style={{ display: 'flex', gap: '0.25rem', marginLeft: 'auto' }}>
-                <button
-                  onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
-                  className="btn btn-secondary btn-sm"
-                >
-                  <ChevronLeft size={16} />
+              <div style={{ display: 'flex', gap: '0.25rem', marginInlineStart: 'auto' }}>
+                <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="btn btn-secondary btn-sm">
+                  <ChevronRight size={16} className="dir-flip" />
                 </button>
-                <button
-                  onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
-                  className="btn btn-secondary btn-sm"
-                >
-                  <ChevronRight size={16} />
+                <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="btn btn-secondary btn-sm">
+                  <ChevronLeft size={16} className="dir-flip" />
                 </button>
               </div>
             </div>
 
-            {/* Calendar Grid */}
             <div className="calendar-grid">
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-                <div key={d} className="calendar-day-header">
-                  {d}
+              {weekDays.map((d) => (
+                <div key={d.toISOString()} className="calendar-day-header">
+                  {format(d, 'EEEEEE', { locale: dateLocale })}
                 </div>
               ))}
 
@@ -331,8 +379,7 @@ export default function BookingModal({
                 const avail = getDayAvailability(day);
                 const isSelectedStart = startDate && isSameDay(day, startDate);
                 const isSelectedEnd = endDate && isSameDay(day, endDate);
-                const isInRange =
-                  startDate && endDate && day > startDate && day < endDate;
+                const isInRange = startDate && endDate && day > startDate && day < endDate;
                 const isCurrentMonthDay = isSameMonth(day, currentMonth);
 
                 let dayClass = 'calendar-day';
@@ -348,20 +395,16 @@ export default function BookingModal({
                     key={day.toISOString()}
                     className={dayClass}
                     onClick={() => handleDateClick(day)}
-                    title={
-                      avail.available
-                        ? `Available (${campsite.dailyCapacity - avail.count} slots left)`
-                        : avail.reason
-                    }
+                    title={avail.available ? undefined : avail.reason}
                   >
-                    <span>{format(day, 'd')}</span>
+                    <span>{format(day, 'd', { locale: dateLocale })}</span>
                     {avail.available && (
                       <span className="day-capacity-dot" style={{ color: 'var(--text-muted)' }}>
                         {avail.count}/{campsite.dailyCapacity}
                       </span>
                     )}
                     {!avail.available && avail.isLockedByOther && (
-                      <span style={{ position: 'absolute', top: 2, right: 2 }}>
+                      <span style={{ position: 'absolute', top: 2, insetInlineEnd: 2 }}>
                         <Lock size={10} style={{ color: '#d97706' }} />
                       </span>
                     )}
@@ -370,103 +413,63 @@ export default function BookingModal({
               })}
             </div>
 
-            {/* Legend */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '1.25rem',
-                marginTop: '1.25rem',
-                fontSize: '0.75rem',
-                color: 'var(--text-secondary)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div className="calendar-legend">
+              <div>
                 <div style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--primary)' }} />
-                <span>Selected</span>
+                <span>{t('booking.selected')}</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <div>
                 <div
                   style={{
                     width: 12,
                     height: 12,
                     borderRadius: 3,
                     background: '#f1f5f9',
-                    backgroundImage: 'repeating-linear-gradient(45deg, #cbd5e1 0, #cbd5e1 2px, transparent 2px, transparent 4px)',
+                    backgroundImage:
+                      'repeating-linear-gradient(45deg, #cbd5e1 0, #cbd5e1 2px, transparent 2px, transparent 4px)',
                   }}
                 />
-                <span>Held by other host</span>
+                <span>{t('booking.heldByOther')}</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <div style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--bg-surface-subtle)', border: '1px dashed #cbd5e1' }} />
-                <span>Full capacity</span>
+              <div>
+                <div
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: 3,
+                    background: 'var(--bg-surface-subtle)',
+                    border: '1px dashed #cbd5e1',
+                  }}
+                />
+                <span>{t('booking.full')}</span>
               </div>
             </div>
 
-            {/* Status and Lock banner */}
             {startDate && !endDate && (
-              <div
-                style={{
-                  marginTop: '1rem',
-                  padding: '0.75rem',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg-surface-subtle)',
-                  fontSize: '0.85rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}
-              >
-                <CalendarIcon size={16} style={{ color: 'var(--primary)' }} />
+              <div className="alert alert-info">
+                <CalendarIcon size={16} />
                 <span>
-                  Check-in: <strong>{format(startDate, 'MMM dd, yyyy')}</strong>. Please click the Check-out date.
+                  {t('booking.checkIn')}: <strong>{format(startDate, 'dd MMM yyyy', { locale: dateLocale })}</strong> ·{' '}
+                  {t('booking.pickCheckout')}
                 </span>
               </div>
             )}
 
             {isLocking && (
               <div style={{ marginTop: '1rem', color: 'var(--primary)', fontSize: '0.85rem' }}>
-                Securing real-time lock for {currentUser?.adminId}...
+                {t('booking.locking')}
               </div>
             )}
 
-            {lockAcquired && startDate && endDate && (
-              <div
-                style={{
-                  marginTop: '1rem',
-                  padding: '0.75rem',
-                  borderRadius: 'var(--radius-sm)',
-                  background: '#ecfdf5',
-                  color: '#065f46',
-                  border: '1px solid #a7f3d0',
-                  fontSize: '0.85rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}
-              >
+            {lockAcquired && startDate && endDate && !isEditMode && (
+              <div className="alert alert-success">
                 <Check size={16} />
-                <span>
-                  Dates <strong>{format(startDate, 'MMM dd')}</strong> to <strong>{format(endDate, 'MMM dd')}</strong> are locked and greyed out for all other active hosts.
-                </span>
+                <span>{t('booking.locked')}</span>
               </div>
             )}
 
             {lockError && (
-              <div
-                style={{
-                  marginTop: '1rem',
-                  padding: '0.75rem',
-                  borderRadius: 'var(--radius-sm)',
-                  background: '#fef2f2',
-                  color: '#991b1b',
-                  border: '1px solid #fecaca',
-                  fontSize: '0.85rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}
-              >
+              <div className="alert alert-error">
                 <AlertCircle size={16} />
                 <span>{lockError}</span>
               </div>
@@ -474,170 +477,138 @@ export default function BookingModal({
           </div>
         )}
 
-        {/* STEP 2: ALL 7 DATA FIELDS ON A SINGLE SCREEN */}
+        {/* STEP 2: BOOKING FIELDS */}
         {step === 2 && (
-          <form onSubmit={handleSaveReservation}>
+          <form onSubmit={handleSubmit}>
             <div className="modal-body">
-              {/* Date recap banner */}
-              <div
-                style={{
-                  padding: '0.75rem 1rem',
-                  background: 'var(--primary-light)',
-                  color: 'var(--primary)',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.85rem',
-                  fontWeight: 600,
-                  marginBottom: '1.25rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
+              <div className="date-recap">
                 <span>
-                  Visit: {startDate && format(startDate, 'MMM dd, yyyy')} → {endDate && format(endDate, 'MMM dd, yyyy')}
+                  {t('booking.visit')}: {startDate && format(startDate, 'dd MMM yyyy', { locale: dateLocale })} —{' '}
+                  {endDate && format(endDate, 'dd MMM yyyy', { locale: dateLocale })}
                 </span>
-                <span style={{ fontSize: '0.75rem', background: 'var(--bg-surface)', padding: '2px 8px', borderRadius: '4px' }}>
-                  Locked for {currentUser?.adminId}
-                </span>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setStep(1)}>
+                  <CalendarIcon size={14} />
+                  <span>{t('booking.back')}</span>
+                </button>
               </div>
 
               {saveError && (
-                <div
-                  style={{
-                    padding: '0.75rem',
-                    background: '#fef2f2',
-                    color: '#991b1b',
-                    borderRadius: 'var(--radius-sm)',
-                    marginBottom: '1rem',
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  {saveError}
+                <div className="alert alert-error" style={{ marginTop: 0, marginBottom: '1rem' }}>
+                  <AlertCircle size={16} />
+                  <span>{saveError}</span>
                 </div>
               )}
 
               <div className="fields-grid">
-                {/* 1. Customer Name */}
                 <div className="form-group">
-                  <label className="form-label">1. Customer Full Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. John Doe"
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                  />
+                  <label className="form-label">{t('field.customerName')} *</label>
+                  <input type="text" required value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
                 </div>
 
-                {/* 2. Customer Phone */}
                 <div className="form-group">
-                  <label className="form-label">2. Phone Number *</label>
-                  <input
-                    type="tel"
-                    required
-                    placeholder="e.g. +1 (555) 019-2834"
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                  />
+                  <label className="form-label">{t('field.phone')} *</label>
+                  <input type="tel" required value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} />
                 </div>
 
-                {/* 3. Number of Guests */}
                 <div className="form-group">
-                  <label className="form-label">3. Number of Campers / Guests</label>
+                  <label className="form-label">{t('field.country')} *</label>
+                  <select value={country} onChange={(e) => setCountry(e.target.value)}>
+                    {gccCountries.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {countryFlag(c.code)} {lang === 'ar' ? c.ar : c.en}
+                      </option>
+                    ))}
+                    <option disabled>──────────</option>
+                    {otherCountries.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {countryFlag(c.code)} {lang === 'ar' ? c.ar : c.en}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">{t('field.guests')}</label>
                   <input
                     type="number"
                     min="1"
-                    max="50"
                     value={guestCount}
                     onChange={(e) => setGuestCount(Math.max(1, parseInt(e.target.value) || 1))}
                   />
                 </div>
 
-                {/* 4. Rented Tents */}
                 <div className="form-group">
-                  <label className="form-label">4. Gear: Rented Tents (Qty)</label>
+                  <label className="form-label">{t('field.tents')}</label>
                   <input
                     type="number"
                     min="0"
-                    max="20"
                     value={rentedTents}
                     onChange={(e) => setRentedTents(Math.max(0, parseInt(e.target.value) || 0))}
                   />
                 </div>
 
-                {/* 5. Rented Cars / Parking */}
                 <div className="form-group">
-                  <label className="form-label">5. Gear: Rented Cars / Parking (Qty)</label>
+                  <label className="form-label">{t('field.cars')}</label>
                   <input
                     type="number"
                     min="0"
-                    max="10"
                     value={rentedCars}
                     onChange={(e) => setRentedCars(Math.max(0, parseInt(e.target.value) || 0))}
                   />
                 </div>
 
-                {/* 6. Rented Birds */}
                 <div className="form-group">
-                  <label className="form-label">6. Special: Rented Birds (Qty)</label>
+                  <label className="form-label">{t('field.birds')}</label>
                   <input
                     type="number"
                     min="0"
-                    max="10"
                     value={rentedBirds}
                     onChange={(e) => setRentedBirds(Math.max(0, parseInt(e.target.value) || 0))}
                   />
                 </div>
 
-                {/* 7. Rented Rabbits */}
                 <div className="form-group">
-                  <label className="form-label">7. Special: Rented Rabbits (Qty)</label>
+                  <label className="form-label">{t('field.rabbits')}</label>
                   <input
                     type="number"
                     min="0"
-                    max="20"
                     value={rentedRabbits}
                     onChange={(e) => setRentedRabbits(Math.max(0, parseInt(e.target.value) || 0))}
                   />
                 </div>
 
-                {/* Notes (Optional) */}
-                <div className="form-group field-full">
-                  <label className="form-label">Special Requests / Caller Notes (Optional)</label>
-                  <textarea
-                    rows={2}
-                    placeholder="e.g. Needs shade, late check-in, brought pet bedding..."
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
+                <div className="form-group">
+                  <label className="form-label">
+                    {t('field.deposit')} <span style={{ fontWeight: 400 }}>({t('field.optional')})</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(e.target.value)}
                   />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{t('booking.depositHint')}</span>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">{t('booking.total')}</label>
+                  <div className="total-display">{formatMoney(total, lang)}</div>
+                </div>
+
+                <div className="form-group field-full">
+                  <label className="form-label">{t('field.notes')}</label>
+                  <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
                 </div>
               </div>
             </div>
 
-            {/* Step 2 Footer */}
             <div className="modal-footer">
-              <button
-                type="button"
-                onClick={() => setStep(1)}
-                className="btn btn-secondary"
-                disabled={isSaving}
-              >
-                Back to Calendar
+              <button type="button" onClick={handleCancelAndRelease} className="btn btn-secondary" disabled={isSaving}>
+                {isEditMode ? t('booking.close') : t('action.cancel')}
               </button>
-              <button
-                type="button"
-                onClick={handleCancelAndRelease}
-                className="btn btn-secondary"
-                disabled={isSaving}
-              >
-                Cancel Booking
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={isSaving}
-              >
-                {isSaving ? 'Saving...' : 'Save Reservation'}
+              <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                {isSaving ? t('booking.saving') : isEditMode ? t('booking.saveEdit') : t('booking.save')}
               </button>
             </div>
           </form>
@@ -647,14 +618,14 @@ export default function BookingModal({
         {step === 1 && (
           <div className="modal-footer">
             <button onClick={handleCancelAndRelease} className="btn btn-secondary">
-              Cancel
+              {isEditMode ? t('booking.close') : t('action.cancel')}
             </button>
             <button
               onClick={() => setStep(2)}
-              disabled={!startDate || !endDate || !lockAcquired}
+              disabled={!startDate || !endDate || (!isEditMode && !lockAcquired)}
               className="btn btn-primary"
             >
-              Next: Reservation Info (7 Fields) →
+              {t('booking.next')}
             </button>
           </div>
         )}

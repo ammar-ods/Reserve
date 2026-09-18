@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Sliders, Check, AlertCircle } from 'lucide-react';
-import { CampsiteDTO, SystemSettingsDTO, UserSession } from '@/lib/types';
+import { useCallback, useEffect, useState } from 'react';
+import { X, Sliders, Check, AlertCircle, UserPlus } from 'lucide-react';
+import { useLang } from './LanguageProvider';
+import { translateError } from '@/lib/i18n';
+import { CampsiteDTO, SystemSettingsDTO, UserAccountDTO, UserSession } from '@/lib/types';
 
 interface AdminSettingsModalProps {
   isOpen: boolean;
@@ -23,26 +25,62 @@ export default function AdminSettingsModal({
   onSettingsUpdated,
   onCampsiteCapacityUpdated,
 }: AdminSettingsModalProps) {
-  const [pageTitle, setPageTitle] = useState(settings.pageTitle || 'Reserve - Campsite Reservation System');
+  const { t, lang } = useLang();
+
+  const [pageTitle, setPageTitle] = useState(settings.pageTitle);
   const [headers, setHeaders] = useState(settings.tableHeaders);
   const [capacities, setCapacities] = useState<Record<string, number>>({});
+  const [prices, setPrices] = useState({
+    priceTent: settings.priceTent,
+    priceCar: settings.priceCar,
+    priceBird: settings.priceBird,
+    priceRabbit: settings.priceRabbit,
+  });
   const [isSaving, setIsSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      setPageTitle(settings.pageTitle || 'Reserve - Campsite Reservation System');
-      setHeaders(settings.tableHeaders);
-      const capMap: Record<string, number> = {};
-      campsites.forEach((c) => {
-        capMap[c.id] = c.dailyCapacity;
-      });
-      setCapacities(capMap);
-      setSuccessMsg(null);
-      setErrorMsg(null);
+  // Account creation state
+  const [accounts, setAccounts] = useState<UserAccountDTO[]>([]);
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState<'ADMIN' | 'HOST'>('HOST');
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [accountMsg, setAccountMsg] = useState<string | null>(null);
+  const [accountError, setAccountError] = useState<string | null>(null);
+
+  const loadAccounts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/users');
+      const data = await res.json();
+      if (data.success) setAccounts(data.users);
+    } catch (e) {
+      console.error('Failed to load accounts:', e);
     }
-  }, [isOpen, settings, campsites]);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    setPageTitle(settings.pageTitle);
+    setHeaders(settings.tableHeaders);
+    setPrices({
+      priceTent: settings.priceTent,
+      priceCar: settings.priceCar,
+      priceBird: settings.priceBird,
+      priceRabbit: settings.priceRabbit,
+    });
+    const capMap: Record<string, number> = {};
+    campsites.forEach((c) => {
+      capMap[c.id] = c.dailyCapacity;
+    });
+    setCapacities(capMap);
+    setSuccessMsg(null);
+    setErrorMsg(null);
+    setAccountMsg(null);
+    setAccountError(null);
+    loadAccounts();
+  }, [isOpen, settings, campsites, loadAccounts]);
 
   if (!isOpen) return null;
 
@@ -53,24 +91,24 @@ export default function AdminSettingsModal({
     setSuccessMsg(null);
 
     try {
-      // 1. Save Header & Title settings
       const settingsRes = await fetch('/api/admin/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pageTitle,
           tableHeaders: headers,
+          ...prices,
           adminId: currentUser?.adminId,
           userName: currentUser?.name,
+          requesterRole: currentUser?.role,
         }),
       });
       const settingsData = await settingsRes.json();
       if (!settingsData.success) {
-        throw new Error(settingsData.error || 'Failed to save settings');
+        throw new Error(translateError(settingsData.error, lang));
       }
       onSettingsUpdated(settingsData.settings);
 
-      // 2. Save campsite capacity changes
       for (const site of campsites) {
         const newCap = capacities[site.id];
         if (newCap !== undefined && newCap !== site.dailyCapacity) {
@@ -82,6 +120,7 @@ export default function AdminSettingsModal({
               dailyCapacity: newCap,
               adminId: currentUser?.adminId,
               userName: currentUser?.name,
+              requesterRole: currentUser?.role,
             }),
           });
           const capData = await capRes.json();
@@ -91,25 +130,79 @@ export default function AdminSettingsModal({
         }
       }
 
-      setSuccessMsg('Settings and capacity limits updated successfully!');
+      setSuccessMsg(t('settings.saved'));
       setTimeout(() => {
         onClose();
-      }, 1200);
+      }, 1100);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Failed to save admin settings';
-      setErrorMsg(message);
+      setErrorMsg(e instanceof Error ? e.message : t('common.saveFailed'));
     } finally {
       setIsSaving(false);
     }
   };
 
+  const handleCreateAccount = async () => {
+    setAccountMsg(null);
+    setAccountError(null);
+    setIsCreatingUser(true);
+
+    try {
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: newUsername.trim(),
+          password: newPassword,
+          role: newRole,
+          requesterRole: currentUser?.role,
+          requesterAdminId: currentUser?.adminId,
+          requesterName: currentUser?.name,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setAccountMsg(`${t('account.created')}: ${data.user.username} (${data.user.adminId})`);
+        setNewUsername('');
+        setNewPassword('');
+        loadAccounts();
+      } else {
+        setAccountError(translateError(data.error, lang));
+      }
+    } catch {
+      setAccountError(t('common.networkError'));
+    } finally {
+      setIsCreatingUser(false);
+    }
+  };
+
+  const priceFields: { key: keyof typeof prices; labelKey: string }[] = [
+    { key: 'priceTent', labelKey: 'field.priceTent' },
+    { key: 'priceCar', labelKey: 'field.priceCar' },
+    { key: 'priceBird', labelKey: 'field.priceBird' },
+    { key: 'priceRabbit', labelKey: 'field.priceRabbit' },
+  ];
+
+  const headerFields: { key: keyof SystemSettingsDTO['tableHeaders']; labelKey: string }[] = [
+    { key: 'colId', labelKey: 'col.id' },
+    { key: 'colCustomer', labelKey: 'col.customer' },
+    { key: 'colDates', labelKey: 'col.dates' },
+    { key: 'colGuests', labelKey: 'col.guests' },
+    { key: 'colItems', labelKey: 'col.items' },
+    { key: 'colTotal', labelKey: 'col.total' },
+    { key: 'colDeposit', labelKey: 'col.deposit' },
+    { key: 'colStatus', labelKey: 'col.status' },
+    { key: 'colHost', labelKey: 'col.host' },
+    { key: 'colActions', labelKey: 'col.actions' },
+  ];
+
   return (
     <div className="modal-overlay">
-      <div className="modal-content" style={{ maxWidth: '640px' }}>
+      <div className="modal-content" style={{ maxWidth: '680px' }}>
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Sliders size={20} style={{ color: 'var(--primary)' }} />
-            <h3 className="modal-title">Admin Management & UI Customization</h3>
+            <h3 className="modal-title">{t('settings.title')}</h3>
           </div>
           <button onClick={onClose} style={{ color: 'var(--text-muted)' }}>
             <X size={20} />
@@ -119,50 +212,24 @@ export default function AdminSettingsModal({
         <form onSubmit={handleSave}>
           <div className="modal-body">
             {successMsg && (
-              <div
-                style={{
-                  padding: '0.75rem',
-                  background: '#ecfdf5',
-                  color: '#065f46',
-                  borderRadius: 'var(--radius-sm)',
-                  marginBottom: '1rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}
-              >
+              <div className="alert alert-success" style={{ marginTop: 0 }}>
                 <Check size={16} />
                 <span>{successMsg}</span>
               </div>
             )}
 
             {errorMsg && (
-              <div
-                style={{
-                  padding: '0.75rem',
-                  background: '#fef2f2',
-                  color: '#991b1b',
-                  borderRadius: 'var(--radius-sm)',
-                  marginBottom: '1rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}
-              >
+              <div className="alert alert-error" style={{ marginTop: 0 }}>
                 <AlertCircle size={16} />
                 <span>{errorMsg}</span>
               </div>
             )}
 
-            {/* Section 1: Campsite Daily Capacity Limits */}
-            <div style={{ marginBottom: '1.5rem' }}>
-              <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.75rem', color: 'var(--primary)' }}>
-                1. Campsite Daily Reservation Caps (Hard Limit)
-              </h4>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                Dates automatically grey out when total active bookings + holds on any single date reach this limit.
-              </p>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
+            {/* 1. Daily caps */}
+            <section className="settings-section">
+              <h4>{t('settings.caps')}</h4>
+              <p>{t('settings.capsHint')}</p>
+              <div className="settings-grid">
                 {campsites.map((site) => (
                   <div key={site.id} className="form-group">
                     <label className="form-label">{site.name}</label>
@@ -181,101 +248,126 @@ export default function AdminSettingsModal({
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
 
-            {/* Section 2: Table Header & UI Customization */}
-            <div>
-              <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.75rem', color: 'var(--primary)' }}>
-                2. Customize Table Column Headers & Page View
-              </h4>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                Rename table column titles and application headings to suit operational terminology.
-              </p>
+            {/* 2. Unit prices used for the auto-calculated totals */}
+            <section className="settings-section">
+              <h4>{t('settings.prices')}</h4>
+              <p>{t('settings.pricesHint')}</p>
+              <div className="settings-grid">
+                {priceFields.map((field) => (
+                  <div key={field.key} className="form-group">
+                    <label className="form-label">
+                      {t(field.labelKey)} ({t('common.currency')})
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={prices[field.key]}
+                      onChange={(e) =>
+                        setPrices({ ...prices, [field.key]: Math.max(0, Number(e.target.value) || 0) })
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
 
+            {/* 3. Accounts */}
+            <section className="settings-section">
+              <h4>{t('settings.accounts')}</h4>
+              <p>{t('settings.accountsHint')}</p>
+
+              {accountMsg && (
+                <div className="alert alert-success" style={{ marginTop: 0 }}>
+                  <Check size={16} />
+                  <span>{accountMsg}</span>
+                </div>
+              )}
+              {accountError && (
+                <div className="alert alert-error" style={{ marginTop: 0 }}>
+                  <AlertCircle size={16} />
+                  <span>{accountError}</span>
+                </div>
+              )}
+
+              <div className="settings-grid">
+                <div className="form-group">
+                  <label className="form-label">{t('field.username')} *</label>
+                  <input type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t('field.password')} *</label>
+                  <input
+                    type="text"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder={t('account.passwordHint')}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t('field.role')}</label>
+                  <select value={newRole} onChange={(e) => setNewRole(e.target.value as 'ADMIN' | 'HOST')}>
+                    <option value="HOST">{t('role.HOST')}</option>
+                    <option value="ADMIN">{t('role.ADMIN')}</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleCreateAccount}
+                    disabled={isCreatingUser || !newUsername.trim() || !newPassword}
+                  >
+                    <UserPlus size={15} />
+                    <span>{isCreatingUser ? t('account.creating') : t('account.create')}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="accounts-list">
+                <span className="accounts-list-title">{t('account.existing')}</span>
+                {accounts.map((acc) => (
+                  <div key={acc.id} className="accounts-list-row">
+                    <span style={{ fontWeight: 600 }}>{acc.username}</span>
+                    <span className={`role-pill role-${acc.role}`}>{t(`role.${acc.role}`)}</span>
+                    <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                      {acc.adminId}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* 4. Titles & column labels */}
+            <section className="settings-section">
+              <h4>{t('settings.view')}</h4>
               <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label className="form-label">System Page Title</label>
-                <input
-                  type="text"
-                  value={pageTitle}
-                  onChange={(e) => setPageTitle(e.target.value)}
-                />
+                <label className="form-label">{t('field.pageTitle')}</label>
+                <input type="text" value={pageTitle} onChange={(e) => setPageTitle(e.target.value)} />
               </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
-                <div className="form-group">
-                  <label className="form-label">Column 1 (ID)</label>
-                  <input
-                    type="text"
-                    value={headers.colId}
-                    onChange={(e) => setHeaders({ ...headers, colId: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Column 2 (Customer)</label>
-                  <input
-                    type="text"
-                    value={headers.colCustomer}
-                    onChange={(e) => setHeaders({ ...headers, colCustomer: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Column 3 (Dates)</label>
-                  <input
-                    type="text"
-                    value={headers.colDates}
-                    onChange={(e) => setHeaders({ ...headers, colDates: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Column 4 (Guests)</label>
-                  <input
-                    type="text"
-                    value={headers.colGuests}
-                    onChange={(e) => setHeaders({ ...headers, colGuests: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Column 5 (Gear & Animals)</label>
-                  <input
-                    type="text"
-                    value={headers.colGear}
-                    onChange={(e) => setHeaders({ ...headers, colGear: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Column 6 (Status)</label>
-                  <input
-                    type="text"
-                    value={headers.colStatus}
-                    onChange={(e) => setHeaders({ ...headers, colStatus: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Column 7 (Host ID)</label>
-                  <input
-                    type="text"
-                    value={headers.colHost}
-                    onChange={(e) => setHeaders({ ...headers, colHost: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Column 8 (Actions)</label>
-                  <input
-                    type="text"
-                    value={headers.colActions}
-                    onChange={(e) => setHeaders({ ...headers, colActions: e.target.value })}
-                  />
-                </div>
+              <div className="settings-grid">
+                {headerFields.map((field) => (
+                  <div key={field.key} className="form-group">
+                    <label className="form-label">{t(field.labelKey)}</label>
+                    <input
+                      type="text"
+                      value={headers[field.key]}
+                      onChange={(e) => setHeaders({ ...headers, [field.key]: e.target.value })}
+                    />
+                  </div>
+                ))}
               </div>
-            </div>
+            </section>
           </div>
 
           <div className="modal-footer">
             <button type="button" onClick={onClose} className="btn btn-secondary" disabled={isSaving}>
-              Cancel
+              {t('settings.cancel')}
             </button>
             <button type="submit" className="btn btn-primary" disabled={isSaving}>
-              {isSaving ? 'Saving Changes...' : 'Save Configuration'}
+              {isSaving ? t('settings.saving') : t('settings.save')}
             </button>
           </div>
         </form>

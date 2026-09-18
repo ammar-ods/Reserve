@@ -1,51 +1,61 @@
 import * as XLSX from 'xlsx';
-import { ReservationDTO } from './types';
 import { format } from 'date-fns';
+import { ReservationDTO } from './types';
+import { Lang, translate } from './i18n';
+import { countryName } from './countries';
 
-export function exportReservationsToExcel(reservations: ReservationDTO[], siteName: string = 'All Sites') {
+export function exportReservationsToExcel(
+  reservations: ReservationDTO[],
+  siteName: string = '',
+  lang: Lang = 'ar'
+) {
+  const t = (key: string) => translate(key, lang);
+
   const rows = reservations.map((res) => ({
-    'Reservation ID': res.reservationNumber,
-    'Campsite': res.campsite?.name || siteName,
-    'Customer Name': res.customerName,
-    'Customer Phone': res.customerPhone,
-    'Check-In Date': format(new Date(res.startDate), 'yyyy-MM-dd'),
-    'Check-Out Date': format(new Date(res.endDate), 'yyyy-MM-dd'),
-    'Guests': res.guestCount,
-    'Rented Tents': res.rentedTents,
-    'Rented Cars': res.rentedCars,
-    'Rented Birds': res.rentedBirds,
-    'Rented Rabbits': res.rentedRabbits,
-    'Status': res.status,
-    'Booked By (Admin ID)': res.createdByAdminId,
-    'Notes': res.notes || '',
-    'Created At': format(new Date(res.createdAt), 'yyyy-MM-dd HH:mm'),
+    [t('col.id')]: res.reservationNumber,
+    [t('field.campsite')]: res.campsite?.name || siteName,
+    [t('field.customerName')]: res.customerName,
+    [t('field.phone')]: res.customerPhone,
+    [t('field.country')]: countryName(res.country, lang),
+    [t('field.startDate')]: format(new Date(res.startDate), 'yyyy-MM-dd'),
+    [t('field.endDate')]: format(new Date(res.endDate), 'yyyy-MM-dd'),
+    [t('field.guests')]: res.guestCount,
+    [t('stats.tents')]: res.rentedTents,
+    [t('stats.cars')]: res.rentedCars,
+    [t('stats.birds')]: res.rentedBirds,
+    [t('stats.rabbits')]: res.rentedRabbits,
+    [t('col.total')]: res.totalAmount,
+    [t('col.deposit')]: res.depositAmount ?? 0,
+    [t('col.status')]: t(`status.${res.status}`),
+    [t('col.host')]: res.createdByAdminId,
+    [t('field.notes')]: res.notes || '',
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(rows);
 
-  // Set column widths
-  const colWidths = [
-    { wch: 16 }, // ID
-    { wch: 22 }, // Campsite
-    { wch: 20 }, // Customer
-    { wch: 18 }, // Phone
-    { wch: 14 }, // Check-In
-    { wch: 14 }, // Check-Out
-    { wch: 8 },  // Guests
-    { wch: 12 }, // Tents
-    { wch: 12 }, // Cars
-    { wch: 12 }, // Birds
-    { wch: 14 }, // Rabbits
-    { wch: 12 }, // Status
-    { wch: 18 }, // Booked By
-    { wch: 30 }, // Notes
-    { wch: 18 }, // Created At
+  worksheet['!cols'] = [
+    { wch: 16 }, // reservation no.
+    { wch: 20 }, // campsite
+    { wch: 20 }, // guest name
+    { wch: 18 }, // phone
+    { wch: 18 }, // country
+    { wch: 14 }, // start
+    { wch: 14 }, // end
+    { wch: 8 }, // guests
+    { wch: 10 }, // tents
+    { wch: 10 }, // cars
+    { wch: 10 }, // birds
+    { wch: 12 }, // rabbits
+    { wch: 12 }, // total
+    { wch: 12 }, // deposit
+    { wch: 12 }, // status
+    { wch: 12 }, // host
+    { wch: 30 }, // notes
   ];
-  worksheet['!cols'] = colWidths;
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Reservations');
 
-  const filename = `Reservations_${siteName.replace(/\s+/g, '_')}_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`;
-  XLSX.writeFile(workbook, filename);
+  const suffix = siteName ? `_${siteName.replace(/\s+/g, '_')}` : '';
+  XLSX.writeFile(workbook, `Reservations${suffix}_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`);
 }
