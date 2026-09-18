@@ -10,3 +10,6 @@ node_modules/
 .next/
 out/
 build/
+
+# TypeScript incremental build info
+tsconfig.tsbuildinfo
