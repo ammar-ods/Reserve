@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import '@/styles/globals.css';
+import LanguageProvider from '@/components/LanguageProvider';
 
 export const metadata: Metadata = {
-  title: 'Reserve | Campsite Booking & Real-Time Reservation Management',
-  description: 'Internal campsite reservation and concurrency management tool for hosts and administrators.',
+  title: 'حجوزات محمية المرزوم',
+  description: 'نظام إدارة حجوزات مخيمات محمية المرزوم.',
 };
 
 export default function RootLayout({
@@ -12,8 +13,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" data-theme="light">
-      <body>{children}</body>
+    <html lang="ar" dir="rtl" data-theme="light">
+      <body>
+        <LanguageProvider>{children}</LanguageProvider>
+      </body>
     </html>
   );
 }

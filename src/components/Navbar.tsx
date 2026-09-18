@@ -2,44 +2,29 @@
 
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { Tent, ShieldCheck, LogOut, Sliders } from 'lucide-react';
+import { Tent, ShieldCheck, LogOut, Sliders, Languages } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
+import { useLang } from './LanguageProvider';
 import { UserSession } from '@/lib/types';
 
 interface NavbarProps {
   currentUser: UserSession | null;
-  onUserChange?: (user: UserSession) => void;
   onOpenAdminSettings?: () => void;
   isRealtimeConnected?: boolean;
 }
 
-const PRESET_USERS: UserSession[] = [
-  { id: '1', adminId: 'SA-01', name: 'Sarah Jenkins', email: 'superadmin@reserve.local', role: 'SUPER_ADMIN' },
-  { id: '2', adminId: 'ADM-01', name: 'David Miller', email: 'admin@reserve.local', role: 'ADMIN' },
-  { id: '3', adminId: 'HOST-01', name: 'Amina Clark', email: 'host1@reserve.local', role: 'HOST' },
-  { id: '4', adminId: 'HOST-02', name: 'Marcus Thorne', email: 'host2@reserve.local', role: 'HOST' },
-  { id: '5', adminId: 'HOST-03', name: 'Elena Rodriguez', email: 'host3@reserve.local', role: 'HOST' },
-];
-
 export default function Navbar({
   currentUser,
-  onUserChange,
   onOpenAdminSettings,
   isRealtimeConnected = true,
 }: NavbarProps) {
   const router = useRouter();
   const pathname = usePathname();
-
-  const handleSwitchUser = (adminId: string) => {
-    const target = PRESET_USERS.find((u) => u.adminId === adminId);
-    if (target && onUserChange) {
-      onUserChange(target);
-      localStorage.setItem('reserve_user', JSON.stringify(target));
-    }
-  };
+  const { t, lang, toggleLang } = useLang();
 
   const handleLogout = () => {
     localStorage.removeItem('reserve_user');
+    localStorage.setItem('reserve_lang', 'ar');
     router.push('/');
   };
 
@@ -65,7 +50,7 @@ export default function Navbar({
             >
               <Tent size={20} />
             </div>
-            <span>Reserve</span>
+            <span>{t('brand.place')}</span>
           </Link>
 
           <nav style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.9rem' }}>
@@ -76,7 +61,7 @@ export default function Navbar({
                 color: pathname === '/dashboard' ? 'var(--primary)' : 'var(--text-secondary)',
               }}
             >
-              Dashboard
+              {t('nav.dashboard')}
             </Link>
 
             {/* Exclusive link for Super Admin per spec */}
@@ -92,7 +77,7 @@ export default function Navbar({
                 }}
               >
                 <ShieldCheck size={16} />
-                Global Audit Log
+                {t('nav.auditLog')}
               </Link>
             )}
           </nav>
@@ -100,64 +85,42 @@ export default function Navbar({
 
         <div className="navbar-actions">
           {/* Live Sync Status indicator */}
-          <div className="live-badge" title={isRealtimeConnected ? 'Real-time synchronization active' : 'Connecting...'}>
+          <div className="live-badge">
             <div
               className="live-dot"
               style={{ background: isRealtimeConnected ? '#10b981' : '#f59e0b' }}
             />
-            <span>{isRealtimeConnected ? 'Live Sync' : 'Connecting'}</span>
+            <span>{isRealtimeConnected ? t('nav.live') : t('nav.connecting')}</span>
           </div>
 
-          {/* Admin UI Customization Button */}
           {isAdminOrSuper && onOpenAdminSettings && (
-            <button
-              onClick={onOpenAdminSettings}
-              className="btn btn-secondary btn-sm"
-              title="Admin: Edit table headers, titles, and site capacities"
-            >
+            <button onClick={onOpenAdminSettings} className="btn btn-secondary btn-sm">
               <Sliders size={15} />
-              <span>Admin Settings</span>
+              <span>{t('nav.settings')}</span>
             </button>
           )}
 
-          {/* User selector / profile badge */}
           {currentUser && (
             <div className="user-badge">
-              <span className={`role-pill role-${currentUser.role}`}>
-                {currentUser.role.replace('_', ' ')}
-              </span>
+              <span className={`role-pill role-${currentUser.role}`}>{t(`role.${currentUser.role}`)}</span>
               <span style={{ fontWeight: 600 }}>{currentUser.name}</span>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>({currentUser.adminId})</span>
-
-              {/* Fast role switcher for pair-testing */}
-              <select
-                aria-label="Switch User Role"
-                value={currentUser.adminId}
-                onChange={(e) => handleSwitchUser(e.target.value)}
-                style={{
-                  fontSize: '0.75rem',
-                  padding: '2px 6px',
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--primary)',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                {PRESET_USERS.map((u) => (
-                  <option key={u.adminId} value={u.adminId}>
-                    Switch to {u.adminId} ({u.role})
-                  </option>
-                ))}
-              </select>
             </div>
+          )}
+
+          {/* Language switch is visible to the Super Admin only */}
+          {isSuperAdmin && (
+            <button onClick={toggleLang} className="btn btn-secondary btn-sm" title={t('nav.language')}>
+              <Languages size={15} />
+              <span style={{ fontWeight: 700 }}>{lang === 'ar' ? 'En' : 'ع'}</span>
+            </button>
           )}
 
           <ThemeToggle />
 
           <button
             onClick={handleLogout}
-            title="Logout"
+            title={t('nav.logout')}
+            aria-label={t('nav.logout')}
             style={{
               padding: '0.5rem',
               color: 'var(--text-muted)',

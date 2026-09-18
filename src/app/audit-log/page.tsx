@@ -4,26 +4,22 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { format } from 'date-fns';
-import { ShieldCheck, ArrowLeft, UserPlus, Search, RefreshCw, AlertCircle, Check } from 'lucide-react';
+import { ShieldCheck, ArrowLeft, Search, RefreshCw } from 'lucide-react';
 import Navbar from '@/components/Navbar';
+import AuditDetailModal from '@/components/AuditDetailModal';
+import { useLang } from '@/components/LanguageProvider';
+import { translateError } from '@/lib/i18n';
 import { AuditLogDTO, UserSession } from '@/lib/types';
 
 export default function AuditLogPage() {
   const router = useRouter();
+  const { t, lang, dateLocale } = useLang();
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
   const [logs, setLogs] = useState<AuditLogDTO[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // New User Creation state
-  const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
-  const [newAdminId, setNewAdminId] = useState('');
-  const [newName, setNewName] = useState('');
-  const [newEmail, setNewEmail] = useState('');
-  const [newRole, setNewRole] = useState<'ADMIN' | 'HOST'>('HOST');
-  const [userCreatedMsg, setUserCreatedMsg] = useState<string | null>(null);
-  const [userCreateError, setUserCreateError] = useState<string | null>(null);
+  const [selectedLog, setSelectedLog] = useState<AuditLogDTO | null>(null);
 
   // Authenticate user
   useEffect(() => {
@@ -45,7 +41,6 @@ export default function AuditLogPage() {
     }
   }, [router]);
 
-  // Load audit logs
   const loadLogs = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -55,56 +50,20 @@ export default function AuditLogPage() {
       if (data.success) {
         setLogs(data.logs);
       } else {
-        setError(data.error || 'Failed to fetch audit log');
+        setError(translateError(data.error, lang));
       }
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Network error';
-      setError(message);
+    } catch {
+      setError(t('common.networkError'));
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [lang, t]);
 
   useEffect(() => {
     if (currentUser && currentUser.role === 'SUPER_ADMIN') {
       loadLogs();
     }
   }, [currentUser, loadLogs]);
-
-  // Create new user account handler
-  const handleCreateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setUserCreatedMsg(null);
-    setUserCreateError(null);
-
-    try {
-      const res = await fetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          adminId: newAdminId.trim(),
-          name: newName.trim(),
-          email: newEmail.trim(),
-          role: newRole,
-          requesterRole: currentUser?.role,
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        setUserCreatedMsg(`Successfully created account for ${data.user.name} (${data.user.adminId})!`);
-        setNewAdminId('');
-        setNewName('');
-        setNewEmail('');
-        loadLogs(); // Refresh logs to show the user creation event
-      } else {
-        setUserCreateError(data.error || 'Failed to create user account');
-      }
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Network error';
-      setUserCreateError(message);
-    }
-  };
 
   const filtered = logs.filter((l) => {
     const term = searchTerm.toLowerCase();
@@ -113,6 +72,7 @@ export default function AuditLogPage() {
       l.adminId.toLowerCase().includes(term) ||
       l.userName.toLowerCase().includes(term) ||
       l.action.toLowerCase().includes(term) ||
+      (l.targetLabel && l.targetLabel.toLowerCase().includes(term)) ||
       (l.campsiteName && l.campsiteName.toLowerCase().includes(term)) ||
       l.details.toLowerCase().includes(term)
     );
@@ -122,11 +82,10 @@ export default function AuditLogPage() {
 
   return (
     <div className="app-container">
-      <Navbar currentUser={currentUser} onUserChange={(u) => setCurrentUser(u)} />
+      <Navbar currentUser={currentUser} />
 
       <main className="main-content">
-        {/* Header */}
-        <div style={{ marginBottom: '2rem' }}>
+        <div style={{ marginBottom: '1.5rem' }}>
           <Link
             href="/dashboard"
             style={{
@@ -139,7 +98,7 @@ export default function AuditLogPage() {
               fontWeight: 500,
             }}
           >
-            <ArrowLeft size={16} /> Back to Dashboard
+            <ArrowLeft size={16} className="dir-flip" /> {t('nav.dashboard')}
           </Link>
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
@@ -158,157 +117,42 @@ export default function AuditLogPage() {
               >
                 <ShieldCheck size={26} />
               </div>
-              <div>
-                <h1 style={{ fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
-                  Global System Audit Log
-                </h1>
-                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                  Restricted view for Super Admin • Tracking every add, edit, cancel, and delete with Host Admin IDs
-                </p>
-              </div>
+              <h1 style={{ fontSize: '1.65rem', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
+                {t('audit.title')}
+              </h1>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <button
-                onClick={() => setIsCreateUserOpen(!isCreateUserOpen)}
-                className="btn btn-primary"
-              >
-                <UserPlus size={16} />
-                <span>{isCreateUserOpen ? 'Close Account Form' : 'Create Admin / Host Account'}</span>
-              </button>
-              <button onClick={loadLogs} className="btn btn-secondary" title="Refresh logs">
-                <RefreshCw size={16} />
-              </button>
-            </div>
+            <button onClick={loadLogs} className="btn btn-secondary" title={t('audit.refresh')}>
+              <RefreshCw size={16} />
+              <span>{t('audit.refresh')}</span>
+            </button>
           </div>
         </div>
 
-        {/* Super Admin Account Creation Panel */}
-        {isCreateUserOpen && (
-          <div
-            style={{
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border-color)',
-              borderRadius: 'var(--radius-lg)',
-              padding: '1.5rem',
-              marginBottom: '2rem',
-              boxShadow: 'var(--shadow-md)',
-            }}
-          >
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '0.5rem' }}>
-              Create New Host or Admin Account
-            </h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
-              Add a new staff member to the booking system. Each user is assigned an Admin ID for audit tracking.
-            </p>
-
-            {userCreatedMsg && (
-              <div
-                style={{
-                  padding: '0.75rem',
-                  background: '#ecfdf5',
-                  color: '#065f46',
-                  borderRadius: 'var(--radius-sm)',
-                  marginBottom: '1rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}
-              >
-                <Check size={16} />
-                <span>{userCreatedMsg}</span>
-              </div>
-            )}
-
-            {userCreateError && (
-              <div
-                style={{
-                  padding: '0.75rem',
-                  background: '#fef2f2',
-                  color: '#991b1b',
-                  borderRadius: 'var(--radius-sm)',
-                  marginBottom: '1rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}
-              >
-                <AlertCircle size={16} />
-                <span>{userCreateError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleCreateUser}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-                <div className="form-group">
-                  <label className="form-label">Admin ID (Unique) *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. HOST-04, ADM-02"
-                    value={newAdminId}
-                    onChange={(e) => setNewAdminId(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Full Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Alice Cooper"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Email Address *</label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="e.g. alice@reserve.local"
-                    value={newEmail}
-                    onChange={(e) => setNewEmail(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Role</label>
-                  <select
-                    value={newRole}
-                    onChange={(e) => setNewRole(e.target.value as 'ADMIN' | 'HOST')}
-                  >
-                    <option value="HOST">Host (Manage bookings)</option>
-                    <option value="ADMIN">Admin (Capacities & UI edit)</option>
-                  </select>
-                </div>
-              </div>
-              <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
-                <button type="submit" className="btn btn-primary">
-                  <span>Register Account</span>
-                </button>
-              </div>
-            </form>
+        {error && (
+          <div className="alert alert-error" style={{ marginTop: 0 }}>
+            <span>{error}</span>
           </div>
         )}
 
-        {/* Audit Log Table Card */}
         <div className="table-card">
           <div className="table-toolbar">
             <div className="search-box">
               <Search size={18} style={{ color: 'var(--text-muted)' }} />
               <input
                 type="text"
-                placeholder="Search audit logs by Host ID, action, campsite, or description..."
+                placeholder={t('audit.search')}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
               {searchTerm && (
                 <button onClick={() => setSearchTerm('')} style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  Clear
+                  {t('table.clear')}
                 </button>
               )}
             </div>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              Showing {filtered.length} logged events
+              {t('audit.count')}: {filtered.length} · {t('audit.detail.hint')}
             </span>
           </div>
 
@@ -316,57 +160,46 @@ export default function AuditLogPage() {
             <table className="reserve-table">
               <thead>
                 <tr>
-                  <th>Timestamp</th>
-                  <th>Action</th>
-                  <th>Host (Admin ID)</th>
-                  <th>Role</th>
-                  <th>Target Type</th>
-                  <th>Campsite</th>
-                  <th>Event Details</th>
+                  <th>{t('audit.col.time')}</th>
+                  <th>{t('audit.col.action')}</th>
+                  <th>{t('audit.col.user')}</th>
+                  <th>{t('audit.col.target')}</th>
+                  <th>{t('audit.col.campsite')}</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                      Loading audit events...
+                    <td colSpan={5} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                      {t('audit.loading')}
                     </td>
                   </tr>
                 ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                      No audit events found.
+                    <td colSpan={5} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                      {t('audit.empty')}
                     </td>
                   </tr>
                 ) : (
                   filtered.map((log) => (
-                    <tr key={log.id}>
+                    <tr key={log.id} className="clickable-row" onClick={() => setSelectedLog(log)}>
                       <td style={{ whiteSpace: 'nowrap', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                        {format(new Date(log.timestamp), 'yyyy-MM-dd HH:mm:ss')}
+                        {format(new Date(log.timestamp), 'dd MMM · HH:mm', { locale: dateLocale })}
                       </td>
                       <td>
-                        <span className={`audit-chip audit-${log.action}`}>
-                          {log.action}
-                        </span>
+                        <span className={`audit-chip audit-${log.action}`}>{t(`action.${log.action}`)}</span>
                       </td>
                       <td>
-                        <div style={{ fontWeight: 700, fontFamily: 'monospace' }}>{log.adminId}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{log.userName}</div>
-                      </td>
-                      <td>
-                        <span className={`role-pill role-${log.userRole}`} style={{ fontSize: '0.68rem' }}>
-                          {log.userRole}
-                        </span>
-                      </td>
-                      <td style={{ fontSize: '0.8rem', fontWeight: 600 }}>
-                        {log.targetType}
+                        <div style={{ fontWeight: 600 }}>{log.userName}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                          {log.adminId}
+                        </div>
                       </td>
                       <td style={{ fontSize: '0.85rem' }}>
-                        {log.campsiteName || '—'}
+                        <div style={{ fontWeight: 600 }}>{t(`target.${log.targetType}`)}</div>
+                        <div style={{ color: 'var(--text-secondary)' }}>{log.targetLabel || '—'}</div>
                       </td>
-                      <td style={{ fontSize: '0.85rem', maxWidth: '360px', wordBreak: 'break-word' }}>
-                        {log.details}
-                      </td>
+                      <td style={{ fontSize: '0.85rem' }}>{log.campsiteName || '—'}</td>
                     </tr>
                   ))
                 )}
@@ -375,6 +208,8 @@ export default function AuditLogPage() {
           </div>
         </div>
       </main>
+
+      {selectedLog && <AuditDetailModal log={selectedLog} onClose={() => setSelectedLog(null)} />}
     </div>
   );
 }
