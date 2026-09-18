@@ -52,9 +52,13 @@ async function main() {
   }
 
   // 2. The Super Admin is the only account the system starts with; it creates the rest.
-  const existingSuperAdmin = await prisma.user.findUnique({
-    where: { username: SUPER_ADMIN.username },
-  });
+//  const existingSuperAdmin = await prisma.user.findUnique({
+ //   where: { username: SUPER_ADMIN.username },
+ // });
+ // gemini's workaround:
+const existingSuperAdmin = await prisma.user.findFirst({
+  where: { adminId: SUPER_ADMIN.adminId },
+});
 
   if (existingSuperAdmin) {
     console.log('Super Admin already present, password left untouched.');
