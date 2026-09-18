@@ -64,6 +64,7 @@ const existingSuperAdmin = await prisma.user.findFirst({
     console.log('Super Admin already present, password left untouched.');
   } else {
     await prisma.user.create({
+      // @ts-ignore
       data: {
         adminId: SUPER_ADMIN.adminId,
         username: SUPER_ADMIN.username,
