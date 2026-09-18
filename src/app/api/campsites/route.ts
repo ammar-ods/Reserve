@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
-import { logAuditAction } from '@/lib/audit';
-import { ActionType } from '@prisma/client';
+import { buildChanges, logAuditAction } from '@/lib/audit';
+import { ActionType, Role } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +10,7 @@ export async function GET() {
   try {
     const now = new Date();
     const campsites = await prisma.campsite.findMany({
-      orderBy: { name: 'asc' },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       include: {
         _count: {
           select: {
@@ -46,13 +46,14 @@ export async function GET() {
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
-    const { campsiteId, dailyCapacity, adminId, userName } = body;
+    const { campsiteId, dailyCapacity, adminId, userName, requesterRole } = body;
+
+    if (requesterRole && requesterRole !== 'ADMIN' && requesterRole !== 'SUPER_ADMIN') {
+      return NextResponse.json({ success: false, error: 'FORBIDDEN' }, { status: 403 });
+    }
 
     if (!campsiteId || typeof dailyCapacity !== 'number' || dailyCapacity < 1) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid campsite ID or daily capacity (minimum 1)' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'MISSING_FIELDS' }, { status: 400 });
     }
 
     const current = await prisma.campsite.findUnique({
@@ -60,10 +61,9 @@ export async function PATCH(request: NextRequest) {
     });
 
     if (!current) {
-      return NextResponse.json({ success: false, error: 'Campsite not found' }, { status: 404 });
+      return NextResponse.json({ success: false, error: 'NOT_FOUND' }, { status: 404 });
     }
 
-    const oldCapacity = current.dailyCapacity;
     const updated = await prisma.campsite.update({
       where: { id: campsiteId },
       data: { dailyCapacity },
@@ -78,12 +78,19 @@ export async function PATCH(request: NextRequest) {
     // Audit log
     await logAuditAction({
       action: ActionType.SETTING_UPDATE,
-      adminId: adminId || 'ADM-01',
-      userName: userName || 'Admin',
+      adminId: adminId || 'SA-01',
+      userName,
+      userRole: requesterRole as Role | undefined,
       targetType: 'CAMPSITE',
       targetId: campsiteId,
+      targetLabel: updated.name,
       campsiteName: updated.name,
-      details: `Updated daily capacity limit for ${updated.name} from ${oldCapacity} to ${dailyCapacity}`,
+      details: `تعديل الحد اليومي للمخيم ${updated.name}`,
+      changes: buildChanges(
+        current as unknown as Record<string, unknown>,
+        updated as unknown as Record<string, unknown>,
+        ['dailyCapacity']
+      ),
     });
 
     return NextResponse.json({ success: true, campsite: updated });

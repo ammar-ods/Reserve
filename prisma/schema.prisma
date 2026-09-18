@@ -31,10 +31,13 @@ enum ActionType {
 
 model User {
   id           String      @id @default(uuid())
-  adminId      String      @unique // e.g. "SA-01", "ADM-01", "HOST-01", "HOST-02", "HOST-03"
+  adminId      String      @unique // e.g. "SA-01", "ADM-01", "HOST-01"
+  username     String      @unique // Login handle, e.g. "superadmin"
+  passwordHash String      // scrypt hash, never a plain password
   name         String
-  email        String      @unique
   role         Role        @default(HOST)
+  isActive     Boolean     @default(true)
+  createdBy    String?     // adminId of the Admin / Super Admin who registered this account
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   auditLogs    AuditLog[]
@@ -42,11 +45,12 @@ model User {
 
 model Campsite {
   id              String        @id @default(uuid())
-  slug            String        @unique // e.g. "pine-ridge", "lakeview-haven", "whispering-woods", "mountain-peak"
+  slug            String        @unique // e.g. "day-use", "standard-camp", "elite-camp", "private-camp"
   name            String
   description     String?
   dailyCapacity   Int           @default(3) // Hard limit on active reservations sharing any single day
   iconName        String        @default("Tent")
+  sortOrder       Int           @default(0) // Display order of the campsites everywhere in the UI
   reservations    Reservation[]
   locks           ActiveLock[]
   createdAt       DateTime      @default(now())
@@ -58,10 +62,11 @@ model Reservation {
   reservationNumber String            @unique // e.g. "RES-2026-0001"
   campsiteId        String
   campsite          Campsite          @relation(fields: [campsiteId], references: [id], onDelete: Cascade)
-  
-  // 7 Data Fields:
+
+  // Booking data fields:
   customerName      String
   customerPhone     String
+  country           String            @default("SA") // ISO 3166-1 alpha-2 code of the visitor
   guestCount        Int               @default(1)
   rentedTents       Int               @default(0)
   rentedCars        Int               @default(0)
@@ -69,16 +74,22 @@ model Reservation {
   rentedRabbits     Int               @default(0)
   notes             String?
 
+  // Money: total is auto-calculated from the Admin-managed unit prices,
+  // deposit is typed in manually by the host and is never required.
+  totalAmount       Float             @default(0)
+  depositAmount     Float?
+
   startDate         DateTime          // Visit Start Date
   endDate           DateTime          // Visit End Date
   status            ReservationStatus @default(PENDING)
-  
+
   createdByAdminId  String            // Host Admin ID who took the phone call
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
   @@index([campsiteId, startDate, endDate])
   @@index([status])
+  @@index([country])
 }
 
 model ActiveLock {
@@ -101,10 +112,12 @@ model AuditLog {
   adminId      String     // Host Admin ID
   userRole     Role
   userName     String
-  targetType   String     // "RESERVATION", "CAMPSITE", "LOCK", "SETTINGS"
+  targetType   String     // "RESERVATION", "CAMPSITE", "LOCK", "SETTINGS", "USER"
   targetId     String?
+  targetLabel  String?    // Human readable target, e.g. "RES-2026-0001 - Ahmed"
   campsiteName String?
-  details      String     // Description of payload or changes
+  details      String     // Short description of the event
+  changes      Json?      // [{ field, labelKey, before, after }] shown in the Super Admin detail popup
   timestamp    DateTime   @default(now())
 
   user         User?      @relation(fields: [adminId], references: [adminId])
@@ -113,9 +126,16 @@ model AuditLog {
 }
 
 model SystemSetting {
-  id          String   @id @default("global_config")
-  pageTitle   String   @default("Reserve - Campsite Management")
-  tableHeaders Json    // Customizable column labels editable by Admin
-  updatedBy   String?
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default("global_config")
+  pageTitle    String   @default("حجوزات محمية المرزوم")
+  tableHeaders Json     // Customizable column labels editable by Admin
+
+  // Unit prices for the rentable items, managed by the Admin next to the daily caps.
+  priceTent    Float    @default(0)
+  priceCar     Float    @default(0)
+  priceBird    Float    @default(0)
+  priceRabbit  Float    @default(0)
+
+  updatedBy    String?
+  updatedAt    DateTime @updatedAt
 }

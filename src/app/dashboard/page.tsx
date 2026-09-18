@@ -6,38 +6,17 @@ import Navbar from '@/components/Navbar';
 import StatsBar from '@/components/StatsBar';
 import CampsiteCard from '@/components/CampsiteCard';
 import AdminSettingsModal from '@/components/AdminSettingsModal';
-import { CampsiteDTO, StatsData, SystemSettingsDTO, UserSession, RealtimeEvent } from '@/lib/types';
+import { useLang } from '@/components/LanguageProvider';
+import { DEFAULT_SETTINGS, DEFAULT_STATS } from '@/lib/defaults';
+import { CampsiteDTO, StatsData, SystemSettingsDTO, UserSession } from '@/lib/types';
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { t, lang } = useLang();
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
   const [campsites, setCampsites] = useState<CampsiteDTO[]>([]);
-  const [stats, setStats] = useState<StatsData>({
-    totalActiveReservations: 0,
-    totalGuests: 0,
-    rentedCars: 0,
-    rentedTents: 0,
-    rentedBirds: 0,
-    rentedRabbits: 0,
-    pendingCount: 0,
-    confirmedCount: 0,
-    cancelledCount: 0,
-  });
-  const [settings, setSettings] = useState<SystemSettingsDTO>({
-    id: 'global_config',
-    pageTitle: 'Reserve - Campsite Management',
-    tableHeaders: {
-      colId: 'Reservation ID',
-      colCustomer: 'Customer / Contact',
-      colDates: 'Visit Dates',
-      colGuests: 'Guests',
-      colGear: 'Rented Gear & Pets',
-      colStatus: 'Booking Status',
-      colHost: 'Host (Admin ID)',
-      colActions: 'Actions',
-    },
-    updatedAt: new Date().toISOString(),
-  });
+  const [stats, setStats] = useState<StatsData>(DEFAULT_STATS);
+  const [settings, setSettings] = useState<SystemSettingsDTO>(DEFAULT_SETTINGS);
 
   const [isAdminSettingsOpen, setIsAdminSettingsOpen] = useState(false);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
@@ -96,14 +75,9 @@ export default function DashboardPage() {
       setIsRealtimeConnected(true);
     };
 
-    eventSource.addEventListener('message', (event) => {
-      try {
-        const parsed: RealtimeEvent = JSON.parse(event.data);
-        // Refresh dashboard metrics when any booking or lock or capacity changes
-        fetchDashboardData();
-      } catch (e) {
-        console.error('Error parsing SSE event:', e);
-      }
+    eventSource.addEventListener('message', () => {
+      // Refresh dashboard metrics when any booking or lock or capacity changes
+      fetchDashboardData();
     });
 
     eventSource.onerror = () => {
@@ -117,59 +91,41 @@ export default function DashboardPage() {
 
   if (!currentUser) return null;
 
+  const isAdminOrSuper = currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN';
+  const pageTitle = lang === 'ar' ? settings.pageTitle || t('brand.system') : t('brand.system');
+
   return (
     <div className="app-container">
       <Navbar
         currentUser={currentUser}
-        onUserChange={(u) => setCurrentUser(u)}
         onOpenAdminSettings={() => setIsAdminSettingsOpen(true)}
         isRealtimeConnected={isRealtimeConnected}
       />
 
       <main className="main-content">
-        {/* Header Title / Welcome Banner */}
-        <div style={{ marginBottom: '2rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-            <div>
-              <h1 style={{ fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
-                {settings.pageTitle || 'Campsite Reservations Dashboard'}
-              </h1>
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.2rem' }}>
-                Welcome, <strong>{currentUser.name}</strong> ({currentUser.adminId}) • Live Phone Booking System
-              </p>
-            </div>
-          </div>
-        </div>
+        <h1 className="page-title">{pageTitle}</h1>
 
-        {/* Middle: Global Stats Cards */}
-        <StatsBar stats={stats} title="Live Global Inventory & Reservations" />
+        <StatsBar stats={stats} title={t('stats.global')} />
 
-        {/* Bottom: 4 Campsite Cards */}
         <section>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              Campsites ({campsites.length})
-            </h2>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              Click any site to manage reservations or initiate a new booking
-            </span>
-          </div>
+          <h2 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem' }}>
+            {t('dash.campsites')} ({campsites.length})
+          </h2>
 
           {isLoading ? (
             <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-              Loading campsites and inventory...
+              {t('dash.loading')}
             </div>
           ) : (
             <div className="campsites-grid">
               {campsites.map((c) => (
-                <CampsiteCard key={c.id} campsite={c} />
+                <CampsiteCard key={c.id} campsite={c} showCapacity={isAdminOrSuper} />
               ))}
             </div>
           )}
         </section>
       </main>
 
-      {/* Admin Settings Modal */}
       {isAdminSettingsOpen && (
         <AdminSettingsModal
           isOpen={isAdminSettingsOpen}
@@ -179,9 +135,7 @@ export default function DashboardPage() {
           settings={settings}
           onSettingsUpdated={(newSettings) => setSettings(newSettings)}
           onCampsiteCapacityUpdated={(id, newCap) => {
-            setCampsites((prev) =>
-              prev.map((c) => (c.id === id ? { ...c, dailyCapacity: newCap } : c))
-            );
+            setCampsites((prev) => prev.map((c) => (c.id === id ? { ...c, dailyCapacity: newCap } : c)));
           }}
         />
       )}

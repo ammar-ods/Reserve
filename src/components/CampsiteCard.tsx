@@ -1,67 +1,45 @@
 'use client';
 
 import Link from 'next/link';
-import { Trees, Waves, Compass, Mountain, Tent, ArrowRight, Lock } from 'lucide-react';
+import { ArrowLeft, Lock } from 'lucide-react';
+import CampsiteIcon from './CampsiteIcon';
+import { useLang } from './LanguageProvider';
 import { CampsiteDTO } from '@/lib/types';
 
 interface CampsiteCardProps {
   campsite: CampsiteDTO;
+  // The daily cap is an operational limit: only Admins and the Super Admin see it.
+  showCapacity?: boolean;
 }
 
-const ICON_MAP: Record<string, React.ReactNode> = {
-  Trees: <Trees size={26} />,
-  Waves: <Waves size={26} />,
-  Compass: <Compass size={26} />,
-  Mountain: <Mountain size={26} />,
-  Tent: <Tent size={26} />,
-};
-
-export default function CampsiteCard({ campsite }: CampsiteCardProps) {
-  const icon = ICON_MAP[campsite.iconName] || <Tent size={26} />;
+export default function CampsiteCard({ campsite, showCapacity = false }: CampsiteCardProps) {
+  const { t } = useLang();
   const activeCount = campsite.activeReservationsCount || 0;
   const locksCount = campsite.activeLocksCount || 0;
-  const totalOccupied = activeCount + locksCount;
-  const isNearCap = totalOccupied >= campsite.dailyCapacity;
 
   return (
     <Link href={`/sites/${campsite.slug}`} className="campsite-card">
       <div>
         <div className="campsite-card-header">
-          <div className="campsite-logo">{icon}</div>
+          <div className="campsite-logo">
+            <CampsiteIcon name={campsite.iconName} />
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             {locksCount > 0 && (
-              <span
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '2px',
-                  fontSize: '0.72rem',
-                  padding: '2px 6px',
-                  borderRadius: '9999px',
-                  background: '#fef3c7',
-                  color: '#92400e',
-                  fontWeight: 600,
-                }}
-                title={`${locksCount} booking(s) currently being held by active hosts`}
-              >
+              <span className="campsite-held-badge">
                 <Lock size={11} />
-                {locksCount} Held
+                {locksCount} {t('card.held')}
               </span>
             )}
-            <span
-              className="campsite-capacity-badge"
-              style={{
-                color: isNearCap ? '#dc2626' : undefined,
-                borderColor: isNearCap ? '#fca5a5' : undefined,
-              }}
-            >
-              Cap: {campsite.dailyCapacity}/day
-            </span>
+            {showCapacity && (
+              <span className="campsite-capacity-badge">
+                {t('card.cap')}: {campsite.dailyCapacity}
+              </span>
+            )}
           </div>
         </div>
 
         <h3 className="campsite-name">{campsite.name}</h3>
-        <p className="campsite-desc">{campsite.description}</p>
       </div>
 
       <div className="campsite-footer">
@@ -71,15 +49,15 @@ export default function CampsiteCard({ campsite }: CampsiteCardProps) {
               width: '8px',
               height: '8px',
               borderRadius: '50%',
-              background: isNearCap ? '#ef4444' : '#10b981',
+              background: '#10b981',
             }}
           />
           <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            {activeCount} Active Bookings
+            {activeCount} {t('card.activeBookings')}
           </span>
         </div>
         <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-          Manage Bookings <ArrowRight size={15} />
+          {t('card.manage')} <ArrowLeft size={15} className="dir-flip" />
         </span>
       </div>
     </Link>

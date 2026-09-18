@@ -9,15 +9,25 @@ export type ActionType =
   | 'DELETE'
   | 'LOCK_ACQUIRED'
   | 'LOCK_RELEASED'
-  | 'SETTING_UPDATE'
-  | 'CAPACITY_UPDATE';
+  | 'SETTING_UPDATE';
 
 export interface UserSession {
   id: string;
-  adminId: string; // e.g. "SA-01", "ADM-01", "HOST-01", "HOST-02", "HOST-03"
+  adminId: string; // e.g. "SA-01", "ADM-01", "HOST-01"
+  username: string;
   name: string;
-  email: string;
   role: Role;
+}
+
+export interface UserAccountDTO {
+  id: string;
+  adminId: string;
+  username: string;
+  name: string;
+  role: Role;
+  isActive: boolean;
+  createdBy: string | null;
+  createdAt: string;
 }
 
 export interface CampsiteDTO {
@@ -42,12 +52,15 @@ export interface ReservationDTO {
   };
   customerName: string;
   customerPhone: string;
+  country: string; // ISO 3166-1 alpha-2
   guestCount: number;
   rentedTents: number;
   rentedCars: number;
   rentedBirds: number;
   rentedRabbits: number;
   notes: string | null;
+  totalAmount: number;
+  depositAmount: number | null;
   startDate: string; // ISO string
   endDate: string; // ISO string
   status: ReservationStatus;
@@ -66,7 +79,14 @@ export interface ActiveLockDTO {
   expiresAt: string; // ISO string
 }
 
-export interface SystemSettingsDTO {
+export interface ItemPrices {
+  priceTent: number;
+  priceCar: number;
+  priceBird: number;
+  priceRabbit: number;
+}
+
+export interface SystemSettingsDTO extends ItemPrices {
   id: string;
   pageTitle: string;
   tableHeaders: {
@@ -74,13 +94,20 @@ export interface SystemSettingsDTO {
     colCustomer: string;
     colDates: string;
     colGuests: string;
-    colGear: string;
+    colItems: string;
+    colTotal: string;
+    colDeposit: string;
     colStatus: string;
     colHost: string;
     colActions: string;
   };
   updatedBy?: string | null;
   updatedAt: string;
+}
+
+export interface CountryCount {
+  code: string;
+  count: number;
 }
 
 export interface StatsData {
@@ -93,6 +120,16 @@ export interface StatsData {
   pendingCount: number;
   confirmedCount: number;
   cancelledCount: number;
+  totalAmount: number;
+  totalDeposits: number;
+  countryCounts: CountryCount[];
+}
+
+export interface AuditChange {
+  field: string;
+  labelKey: string;
+  before: string | number | null;
+  after: string | number | null;
 }
 
 export interface AuditLogDTO {
@@ -103,8 +140,10 @@ export interface AuditLogDTO {
   userName: string;
   targetType: string;
   targetId: string | null;
+  targetLabel: string | null;
   campsiteName: string | null;
   details: string;
+  changes: AuditChange[] | null;
   timestamp: string;
 }
 

@@ -2,23 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Tent, ShieldCheck, UserCheck, ArrowRight } from 'lucide-react';
+import { Tent, ArrowLeft } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
-import { UserSession } from '@/lib/types';
-
-const TEST_ACCOUNTS: UserSession[] = [
-  { id: '1', adminId: 'SA-01', name: 'Sarah Jenkins', email: 'superadmin@reserve.local', role: 'SUPER_ADMIN' },
-  { id: '2', adminId: 'ADM-01', name: 'David Miller', email: 'admin@reserve.local', role: 'ADMIN' },
-  { id: '3', adminId: 'HOST-01', name: 'Amina Clark', email: 'host1@reserve.local', role: 'HOST' },
-  { id: '4', adminId: 'HOST-02', name: 'Marcus Thorne', email: 'host2@reserve.local', role: 'HOST' },
-  { id: '5', adminId: 'HOST-03', name: 'Elena Rodriguez', email: 'host3@reserve.local', role: 'HOST' },
-];
+import { useLang } from '@/components/LanguageProvider';
+import { translateError } from '@/lib/i18n';
 
 export default function LandingPage() {
   const router = useRouter();
-  const [adminIdInput, setAdminIdInput] = useState('');
-  const [passwordInput, setPasswordInput] = useState('');
+  const { t, lang } = useLang();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // If already logged in, redirect to dashboard
   useEffect(() => {
@@ -35,24 +30,37 @@ export default function LandingPage() {
     }
   }, [router]);
 
-  const handleLogin = (user: UserSession) => {
-    localStorage.setItem('reserve_user', JSON.stringify(user));
-    router.push('/dashboard');
-  };
-
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    const target = TEST_ACCOUNTS.find(
-      (u) =>
-        u.adminId.toLowerCase() === adminIdInput.trim().toLowerCase() ||
-        u.email.toLowerCase() === adminIdInput.trim().toLowerCase()
-    );
 
-    if (target) {
-      handleLogin(target);
-    } else {
-      setError('Invalid Admin ID or Email. Try HOST-01, ADM-01, or SA-01, or click one below.');
+    if (!username.trim() || !password) {
+      setError(t('login.required'));
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        localStorage.setItem('reserve_user', JSON.stringify(data.user));
+        if (data.user.role !== 'SUPER_ADMIN') {
+          localStorage.setItem('reserve_lang', 'ar');
+        }
+        router.push('/dashboard');
+      } else {
+        setError(translateError(data.error, lang));
+      }
+    } catch {
+      setError(t('common.networkError'));
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -69,21 +77,20 @@ export default function LandingPage() {
         position: 'relative',
       }}
     >
-      <div style={{ position: 'absolute', top: '1.5rem', right: '1.5rem' }}>
+      <div style={{ position: 'absolute', top: '1.5rem', insetInlineEnd: '1.5rem' }}>
         <ThemeToggle />
       </div>
 
       <div
         style={{
           width: '100%',
-          maxWidth: '440px',
+          maxWidth: '420px',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           textAlign: 'center',
         }}
       >
-        {/* Centered Logo and Title */}
         <div
           style={{
             width: '64px',
@@ -103,28 +110,16 @@ export default function LandingPage() {
 
         <h1
           style={{
-            fontSize: '2.25rem',
+            fontSize: '2rem',
             fontWeight: 800,
-            letterSpacing: '-0.03em',
-            marginBottom: '0.4rem',
+            letterSpacing: '-0.02em',
+            marginBottom: '2rem',
             color: 'var(--text-primary)',
           }}
         >
-          Reserve
+          {t('brand.place')}
         </h1>
 
-        <p
-          style={{
-            fontSize: '0.95rem',
-            color: 'var(--text-secondary)',
-            marginBottom: '2rem',
-            lineHeight: 1.4,
-          }}
-        >
-          Real-Time Campsite Reservation Management & Concurrency Hub
-        </p>
-
-        {/* Login Box Directly Underneath */}
         <div
           style={{
             width: '100%',
@@ -133,101 +128,46 @@ export default function LandingPage() {
             borderRadius: 'var(--radius-lg)',
             padding: '2rem',
             boxShadow: 'var(--shadow-xl)',
-            textAlign: 'left',
+            textAlign: 'start',
           }}
         >
           <form onSubmit={handleFormSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {error && (
-              <div
-                style={{
-                  padding: '0.65rem 0.85rem',
-                  borderRadius: 'var(--radius-sm)',
-                  background: '#fef2f2',
-                  color: '#991b1b',
-                  fontSize: '0.8rem',
-                }}
-              >
-                {error}
+              <div className="alert alert-error">
+                <span>{error}</span>
               </div>
             )}
 
             <div className="form-group">
-              <label className="form-label">Host Admin ID or Email</label>
+              <label className="form-label">{t('login.username')}</label>
               <input
                 type="text"
-                required
-                placeholder="e.g. HOST-01, ADM-01, SA-01"
-                value={adminIdInput}
-                onChange={(e) => setAdminIdInput(e.target.value)}
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Password</label>
+              <label className="form-label">{t('login.password')}</label>
               <input
                 type="password"
-                placeholder="••••••••"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
               />
             </div>
 
             <button
               type="submit"
               className="btn btn-primary"
+              disabled={isSubmitting}
               style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem' }}
             >
-              <span>Sign In to Reserve</span>
-              <ArrowRight size={16} />
+              <span>{isSubmitting ? t('login.loading') : t('login.submit')}</span>
+              {!isSubmitting && <ArrowLeft size={16} className="dir-flip" />}
             </button>
           </form>
-
-          {/* One-Click Quick Testing Switchers */}
-          <div style={{ marginTop: '1.75rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border-color)' }}>
-            <span
-              style={{
-                display: 'block',
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                color: 'var(--text-muted)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                marginBottom: '0.75rem',
-                textAlign: 'center',
-              }}
-            >
-              Or Quick Select Role (Instant Test)
-            </span>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-              {TEST_ACCOUNTS.map((acc) => (
-                <button
-                  key={acc.adminId}
-                  onClick={() => handleLogin(acc)}
-                  className="btn btn-secondary btn-sm"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '0.5rem 0.75rem',
-                    textAlign: 'left',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    {acc.role === 'SUPER_ADMIN' ? (
-                      <ShieldCheck size={16} style={{ color: '#be185d' }} />
-                    ) : (
-                      <UserCheck size={16} style={{ color: '#0f766e' }} />
-                    )}
-                    <span style={{ fontWeight: 600, fontSize: '0.825rem' }}>{acc.name}</span>
-                  </div>
-                  <span className={`role-pill role-${acc.role}`} style={{ fontSize: '0.68rem' }}>
-                    {acc.adminId}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </main>

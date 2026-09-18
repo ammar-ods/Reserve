@@ -2,40 +2,41 @@
 
 import { useState } from 'react';
 import { format } from 'date-fns';
-import { Search, Download, CheckCircle2, XCircle, Clock, FileSpreadsheet } from 'lucide-react';
-import { ReservationDTO, ReservationStatus, SystemSettingsDTO, UserSession } from '@/lib/types';
+import { Search, CheckCircle2, XCircle, Clock, FileSpreadsheet, Pencil } from 'lucide-react';
+import { useLang } from './LanguageProvider';
+import { ReservationDTO, SystemSettingsDTO, UserSession } from '@/lib/types';
 import { exportReservationsToExcel } from '@/lib/export';
+import { formatMoney } from '@/lib/i18n';
+import { countryFlag, countryName } from '@/lib/countries';
 
 interface ReservationTableProps {
   reservations: ReservationDTO[];
   headers?: SystemSettingsDTO['tableHeaders'];
   siteName?: string;
   currentUser: UserSession | null;
-  onStatusChange: (id: string, newStatus: ReservationStatus) => Promise<void>;
-  onRefresh?: () => void;
+  onConfirmRequest: (res: ReservationDTO) => void;
+  onCancel: (res: ReservationDTO) => Promise<void>;
+  onEdit: (res: ReservationDTO) => void;
 }
 
 export default function ReservationTable({
   reservations,
-  headers = {
-    colId: 'Reservation ID',
-    colCustomer: 'Customer / Phone',
-    colDates: 'Visit Dates',
-    colGuests: 'Guests',
-    colGear: 'Rented Gear & Pets',
-    colStatus: 'Status',
-    colHost: 'Host (Admin ID)',
-    colActions: 'Actions',
-  },
-  siteName = 'Campsite',
-  currentUser,
-  onStatusChange,
+  headers,
+  siteName = '',
+  onConfirmRequest,
+  onCancel,
+  onEdit,
 }: ReservationTableProps) {
+  const { t, lang, dateLocale } = useLang();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'CONFIRMED' | 'PENDING' | 'CANCELLED'>('ALL');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  // Filter reservations based on search and status
+  // Admin-renamed headers apply to the Arabic production view; the Super Admin's
+  // English view falls back to the built-in labels.
+  const col = (key: keyof SystemSettingsDTO['tableHeaders'], translationKey: string) =>
+    lang === 'ar' ? headers?.[key] || t(translationKey) : t(translationKey);
+
   const filtered = reservations.filter((res) => {
     const matchesStatus = statusFilter === 'ALL' || res.status === statusFilter;
     const term = searchTerm.toLowerCase();
@@ -48,43 +49,55 @@ export default function ReservationTable({
     return matchesStatus && matchesSearch;
   });
 
-  const handleStatusUpdate = async (id: string, nextStatus: ReservationStatus) => {
+  const handleCancel = async (res: ReservationDTO) => {
     try {
-      setUpdatingId(id);
-      await onStatusChange(id, nextStatus);
+      setUpdatingId(res.id);
+      await onCancel(res);
     } finally {
       setUpdatingId(null);
     }
   };
 
   const handleExport = () => {
-    exportReservationsToExcel(filtered, siteName);
+    exportReservationsToExcel(filtered, siteName, lang);
+  };
+
+  const items = (res: ReservationDTO) => {
+    const chips: { key: string; label: string; background: string; color: string }[] = [];
+    if (res.rentedTents > 0)
+      chips.push({ key: 'tents', label: `${res.rentedTents} ${t('stats.tents')}`, background: '#fef3c7', color: '#92400e' });
+    if (res.rentedCars > 0)
+      chips.push({ key: 'cars', label: `${res.rentedCars} ${t('stats.cars')}`, background: '#f3e8ff', color: '#6b21a8' });
+    if (res.rentedBirds > 0)
+      chips.push({ key: 'birds', label: `${res.rentedBirds} ${t('stats.birds')}`, background: '#e0f2fe', color: '#0369a1' });
+    if (res.rentedRabbits > 0)
+      chips.push({
+        key: 'rabbits',
+        label: `${res.rentedRabbits} ${t('stats.rabbits')}`,
+        background: '#fce7f3',
+        color: '#9d174d',
+      });
+    return chips;
   };
 
   return (
     <div className="table-card">
-      {/* Table Toolbar */}
       <div className="table-toolbar">
-        {/* Instant Search */}
         <div className="search-box">
           <Search size={18} style={{ color: 'var(--text-muted)' }} />
           <input
             type="text"
-            placeholder="Search by customer name or ID (e.g. RES-2026)..."
+            placeholder={t('table.search')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
           {searchTerm && (
-            <button
-              onClick={() => setSearchTerm('')}
-              style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}
-            >
-              Clear
+            <button onClick={() => setSearchTerm('')} style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              {t('table.clear')}
             </button>
           )}
         </div>
 
-        {/* Filter Tabs & Export Button */}
         <div className="toolbar-actions">
           <div className="filter-tabs">
             {(['ALL', 'CONFIRMED', 'PENDING', 'CANCELLED'] as const).map((tab) => (
@@ -93,193 +106,151 @@ export default function ReservationTable({
                 onClick={() => setStatusFilter(tab)}
                 className={`filter-tab ${statusFilter === tab ? 'active' : ''}`}
               >
-                {tab.charAt(0) + tab.slice(1).toLowerCase()}
+                {t(`filter.${tab}`)}
               </button>
             ))}
           </div>
 
-          <button
-            onClick={handleExport}
-            className="btn btn-secondary btn-sm"
-            title="Export filtered records to .xlsx file"
-          >
+          <button onClick={handleExport} className="btn btn-secondary btn-sm">
             <FileSpreadsheet size={16} style={{ color: '#16a34a' }} />
-            <span>Export to .xlsx</span>
+            <span>{t('table.export')}</span>
           </button>
         </div>
       </div>
 
-      {/* Table */}
       <div className="table-responsive">
         <table className="reserve-table">
           <thead>
             <tr>
-              <th>{headers.colId}</th>
-              <th>{headers.colCustomer}</th>
-              <th>{headers.colDates}</th>
-              <th>{headers.colGuests}</th>
-              <th>{headers.colGear}</th>
-              <th>{headers.colStatus}</th>
-              <th>{headers.colHost}</th>
-              <th style={{ textAlign: 'right' }}>{headers.colActions}</th>
+              <th>{col('colId', 'col.id')}</th>
+              <th>{col('colCustomer', 'col.customer')}</th>
+              <th>{col('colDates', 'col.dates')}</th>
+              <th>{col('colGuests', 'col.guests')}</th>
+              <th>{col('colItems', 'col.items')}</th>
+              <th>{col('colTotal', 'col.total')}</th>
+              <th>{col('colDeposit', 'col.deposit')}</th>
+              <th>{col('colStatus', 'col.status')}</th>
+              <th>{col('colHost', 'col.host')}</th>
+              <th style={{ textAlign: 'end' }}>{col('colActions', 'col.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
-                  No reservations found matching the filters.
+                <td colSpan={10} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                  {t('table.empty')}
                 </td>
               </tr>
             ) : (
               filtered.map((res) => {
-                const isConfirmed = res.status === 'CONFIRMED';
-                const isCancelled = res.status === 'CANCELLED';
-                const isPending = res.status === 'PENDING';
                 const isUpdating = updatingId === res.id;
 
                 return (
-                  <tr
-                    key={res.id}
-                    className={`row-${res.status}`}
-                    style={{
-                      opacity: isUpdating ? 0.6 : 1,
-                      transition: 'background-color 0.2s ease',
-                    }}
-                  >
-                    {/* Reservation ID */}
+                  <tr key={res.id} className={`row-${res.status}`} style={{ opacity: isUpdating ? 0.6 : 1 }}>
                     <td style={{ fontWeight: 700, fontFamily: 'monospace', color: 'var(--primary)' }}>
                       {res.reservationNumber}
                     </td>
 
-                    {/* Customer */}
                     <td>
-                      <div style={{ fontWeight: 600 }}>{res.customerName}</div>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <span title={countryName(res.country, lang)} aria-label={countryName(res.country, lang)}>
+                          {countryFlag(res.country)}
+                        </span>
+                        <span>{res.customerName}</span>
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', direction: 'ltr', textAlign: 'start' }}>
                         {res.customerPhone}
                       </div>
                       {res.notes && (
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px', fontStyle: 'italic' }}>
-                          “{res.notes}”
+                          {res.notes}
                         </div>
                       )}
                     </td>
 
-                    {/* Visit Dates - Primary Sort Order */}
                     <td>
-                      <div style={{ fontWeight: 600 }}>
-                        {format(new Date(res.startDate), 'MMM dd, yyyy')}
-                      </div>
+                      <div style={{ fontWeight: 600 }}>{format(new Date(res.startDate), 'dd MMM yyyy', { locale: dateLocale })}</div>
                       <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                        to {format(new Date(res.endDate), 'MMM dd, yyyy')}
+                        {t('table.to')} {format(new Date(res.endDate), 'dd MMM yyyy', { locale: dateLocale })}
                       </div>
                     </td>
 
-                    {/* Guests */}
-                    <td>
-                      <span style={{ fontWeight: 600 }}>{res.guestCount}</span> campers
-                    </td>
+                    <td style={{ fontWeight: 600 }}>{res.guestCount}</td>
 
-                    {/* Rented Gear */}
                     <td>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', fontSize: '0.75rem' }}>
-                        {res.rentedTents > 0 && (
-                          <span style={{ padding: '2px 6px', background: '#fef3c7', color: '#92400e', borderRadius: '4px', fontWeight: 600 }}>
-                            {res.rentedTents} Tents
-                          </span>
-                        )}
-                        {res.rentedCars > 0 && (
-                          <span style={{ padding: '2px 6px', background: '#f3e8ff', color: '#6b21a8', borderRadius: '4px', fontWeight: 600 }}>
-                            {res.rentedCars} Cars
-                          </span>
-                        )}
-                        {res.rentedBirds > 0 && (
-                          <span style={{ padding: '2px 6px', background: '#e0f2fe', color: '#0369a1', borderRadius: '4px', fontWeight: 600 }}>
-                            {res.rentedBirds} Birds
-                          </span>
-                        )}
-                        {res.rentedRabbits > 0 && (
-                          <span style={{ padding: '2px 6px', background: '#fce7f3', color: '#9d174d', borderRadius: '4px', fontWeight: 600 }}>
-                            {res.rentedRabbits} Rabbits
-                          </span>
-                        )}
-                        {!res.rentedTents && !res.rentedCars && !res.rentedBirds && !res.rentedRabbits && (
-                          <span style={{ color: 'var(--text-muted)' }}>None</span>
+                        {items(res).length === 0 ? (
+                          <span style={{ color: 'var(--text-muted)' }}>{t('items.none')}</span>
+                        ) : (
+                          items(res).map((chip) => (
+                            <span
+                              key={chip.key}
+                              style={{
+                                padding: '2px 6px',
+                                background: chip.background,
+                                color: chip.color,
+                                borderRadius: '4px',
+                                fontWeight: 600,
+                              }}
+                            >
+                              {chip.label}
+                            </span>
+                          ))
                         )}
                       </div>
                     </td>
 
-                    {/* Status Badge */}
+                    <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{formatMoney(res.totalAmount, lang)}</td>
+
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {res.depositAmount === null ? (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{t('deposit.none')}</span>
+                      ) : (
+                        formatMoney(res.depositAmount, lang)
+                      )}
+                    </td>
+
                     <td>
                       <span className={`status-badge ${res.status}`}>
-                        {isConfirmed && <CheckCircle2 size={13} />}
-                        {isCancelled && <XCircle size={13} />}
-                        {isPending && <Clock size={13} />}
-                        {res.status}
+                        {res.status === 'CONFIRMED' && <CheckCircle2 size={13} />}
+                        {res.status === 'CANCELLED' && <XCircle size={13} />}
+                        {res.status === 'PENDING' && <Clock size={13} />}
+                        {t(`status.${res.status}`)}
                       </span>
                     </td>
 
-                    {/* Booked By */}
                     <td>
-                      <span
-                        style={{
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          background: 'var(--bg-surface-subtle)',
-                          border: '1px solid var(--border-color)',
-                        }}
-                      >
-                        {res.createdByAdminId}
-                      </span>
+                      <span className="host-tag">{res.createdByAdminId}</span>
                     </td>
 
-                    {/* Actions */}
-                    <td style={{ textAlign: 'right' }}>
+                    <td style={{ textAlign: 'end' }}>
                       <div style={{ display: 'inline-flex', gap: '0.35rem' }}>
                         {res.status !== 'CONFIRMED' && (
                           <button
-                            onClick={() => handleStatusUpdate(res.id, 'CONFIRMED')}
+                            onClick={() => onConfirmRequest(res)}
                             disabled={isUpdating}
                             className="btn btn-sm"
-                            style={{
-                              background: '#dcfce7',
-                              color: '#15803d',
-                              border: '1px solid #86efac',
-                            }}
-                            title="Confirm reservation (turns green)"
+                            style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac' }}
                           >
                             <CheckCircle2 size={14} />
-                            Confirm
+                            {t('action.confirm')}
                           </button>
                         )}
+
+                        <button onClick={() => onEdit(res)} disabled={isUpdating} className="btn btn-secondary btn-sm">
+                          <Pencil size={14} />
+                          {t('action.edit')}
+                        </button>
 
                         {res.status !== 'CANCELLED' && (
                           <button
-                            onClick={() => handleStatusUpdate(res.id, 'CANCELLED')}
+                            onClick={() => handleCancel(res)}
                             disabled={isUpdating}
                             className="btn btn-sm"
-                            style={{
-                              background: '#fee2e2',
-                              color: '#b91c1c',
-                              border: '1px solid #fca5a5',
-                            }}
-                            title="Cancel reservation (turns red, frees dates, keeps history)"
+                            style={{ background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5' }}
                           >
                             <XCircle size={14} />
-                            Cancel
-                          </button>
-                        )}
-
-                        {res.status !== 'PENDING' && (
-                          <button
-                            onClick={() => handleStatusUpdate(res.id, 'PENDING')}
-                            disabled={isUpdating}
-                            className="btn btn-secondary btn-sm"
-                            title="Revert back to Pending"
-                          >
-                            Reset
+                            {t('action.cancel')}
                           </button>
                         )}
                       </div>
