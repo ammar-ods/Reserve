@@ -1,13 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { broadcastRealtimeEvent, checkCapacityAvailability, releaseLock } from '@/lib/realtime';
+import {
+  bookedCampTypesForRange,
+  broadcastRealtimeEvent,
+  checkCampTypeAvailability,
+  checkCapacityAvailability,
+  releaseLock,
+} from '@/lib/realtime';
 import { buildCreationSnapshot, logAuditAction } from '@/lib/audit';
-import { getSystemSettings, pricesOf } from '@/lib/settings';
-import { calculateTotal } from '@/lib/pricing';
-import { ActionType, ReservationStatus } from '@prisma/client';
+import { ActionType, ReservationStatus, VisitPeriod } from '@prisma/client';
 import { CountryCount } from '@/lib/types';
+import { hasCampTypeField, hasTentsField, hasVisitPeriodField, isDayUse, isPrivateCampTypeId } from '@/lib/campsites';
+import { isValidBookingRange } from '@/lib/dates';
 
 export const dynamic = 'force-dynamic';
+
+function formatReservation(
+  reservation: Record<string, unknown> & {
+    startDate: Date;
+    endDate: Date;
+    createdAt: Date;
+    updatedAt: Date;
+    createdByAdminId: string;
+  },
+  hostNames: Map<string, string>
+) {
+  return {
+    ...reservation,
+    createdByName: hostNames.get(reservation.createdByAdminId) || reservation.createdByAdminId,
+    startDate: reservation.startDate.toISOString(),
+    endDate: reservation.endDate.toISOString(),
+    createdAt: reservation.createdAt.toISOString(),
+    updatedAt: reservation.updatedAt.toISOString(),
+  };
+}
+
+async function hostNameMap(adminIds: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(adminIds.filter(Boolean))];
+  if (unique.length === 0) return new Map();
+  const users = await prisma.user.findMany({
+    where: { adminId: { in: unique } },
+    select: { adminId: true, name: true, username: true },
+  });
+  return new Map(users.map((u) => [u.adminId, u.name || u.username]));
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +52,6 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status');
     const search = searchParams.get('search')?.trim();
 
-    // Query reservations sorted by visit date (startDate asc)
     const reservations = await prisma.reservation.findMany({
       where: {
         ...(campsiteId ? { campsiteId } : {}),
@@ -37,12 +72,12 @@ export async function GET(request: NextRequest) {
         },
       },
       orderBy: {
-        startDate: 'asc', // Explicit requirement: sorted by 'visit date' (not creation date)
+        startDate: 'asc',
       },
     });
 
-    // Calculate live stats for both previous and current/upcoming reservations (PENDING + CONFIRMED)
-    // Cancelled are excluded from stats per spec
+    const names = await hostNameMap(reservations.map((r) => r.createdByAdminId));
+
     const allReserved = await prisma.reservation.findMany({
       where: {
         ...(campsiteId ? { campsiteId } : {}),
@@ -57,6 +92,8 @@ export async function GET(request: NextRequest) {
         rentedTents: true,
         rentedBirds: true,
         rentedRabbits: true,
+        rentedSalukis: true,
+        rentedGazelles: true,
         totalAmount: true,
         depositAmount: true,
         status: true,
@@ -70,15 +107,17 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // Visitor nationalities, ordered by how many bookings each country holds
-    const countryTally = new Map<string, number>();
+    const countryTally = new Map<string, { bookings: number; guests: number }>();
     allReserved.forEach((r) => {
-      const code = r.country || 'SA';
-      countryTally.set(code, (countryTally.get(code) || 0) + 1);
+      const code = r.country || 'AE';
+      const current = countryTally.get(code) || { bookings: 0, guests: 0 };
+      current.bookings += 1;
+      current.guests += r.guestCount || 0;
+      countryTally.set(code, current);
     });
     const countryCounts: CountryCount[] = [...countryTally.entries()]
-      .map(([code, count]) => ({ code, count }))
-      .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
+      .map(([code, value]) => ({ code, bookings: value.bookings, guests: value.guests }))
+      .sort((a, b) => b.bookings - a.bookings || a.code.localeCompare(b.code));
 
     const stats = {
       totalActiveReservations: allReserved.length,
@@ -87,6 +126,8 @@ export async function GET(request: NextRequest) {
       rentedTents: allReserved.reduce((acc, r) => acc + (r.rentedTents || 0), 0),
       rentedBirds: allReserved.reduce((acc, r) => acc + (r.rentedBirds || 0), 0),
       rentedRabbits: allReserved.reduce((acc, r) => acc + (r.rentedRabbits || 0), 0),
+      rentedSalukis: allReserved.reduce((acc, r) => acc + (r.rentedSalukis || 0), 0),
+      rentedGazelles: allReserved.reduce((acc, r) => acc + (r.rentedGazelles || 0), 0),
       pendingCount: allReserved.filter((r) => r.status === 'PENDING').length,
       confirmedCount: allReserved.filter((r) => r.status === 'CONFIRMED').length,
       cancelledCount,
@@ -97,13 +138,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      reservations: reservations.map((r) => ({
-        ...r,
-        startDate: r.startDate.toISOString(),
-        endDate: r.endDate.toISOString(),
-        createdAt: r.createdAt.toISOString(),
-        updatedAt: r.updatedAt.toISOString(),
-      })),
+      reservations: reservations.map((r) => formatReservation(r, names)),
       stats,
     });
   } catch (error: unknown) {
@@ -119,12 +154,16 @@ export async function POST(request: NextRequest) {
       campsiteId,
       customerName,
       customerPhone,
-      country = 'SA',
+      country = 'AE',
       guestCount = 1,
       rentedTents = 0,
       rentedCars = 0,
       rentedBirds = 0,
       rentedRabbits = 0,
+      rentedSalukis = 0,
+      rentedGazelles = 0,
+      visitPeriod,
+      campType,
       notes = '',
       depositAmount,
       startDate,
@@ -137,14 +176,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'MISSING_FIELDS' }, { status: 400 });
     }
 
+    const campsite = await prisma.campsite.findUnique({ where: { id: campsiteId } });
+    if (!campsite) {
+      return NextResponse.json({ success: false, error: 'NOT_FOUND' }, { status: 404 });
+    }
+
     const start = new Date(startDate);
     const end = new Date(endDate);
-
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
+    if (!isValidBookingRange(start, end, isDayUse(campsite.slug))) {
       return NextResponse.json({ success: false, error: 'INVALID_DATES' }, { status: 400 });
     }
 
-    // Verify capacity limit before committing (excludes current host's lock so their own held slot is honored)
+    if (hasVisitPeriodField(campsite.slug) && visitPeriod !== 'MORNING' && visitPeriod !== 'EVENING') {
+      return NextResponse.json({ success: false, error: 'MISSING_PERIOD' }, { status: 400 });
+    }
+
+    if (hasCampTypeField(campsite.slug)) {
+      if (!campType || !isPrivateCampTypeId(String(campType))) {
+        return NextResponse.json({ success: false, error: 'MISSING_CAMP_TYPE' }, { status: 400 });
+      }
+      const typeCheck = await checkCampTypeAvailability(campsiteId, String(campType), start, end);
+      if (!typeCheck.available) {
+        return NextResponse.json(
+          { success: false, error: 'CAMP_TYPE_TAKEN', congestedDate: typeCheck.congestedDate },
+          { status: 409 }
+        );
+      }
+    }
+
     const check = await checkCapacityAvailability(campsiteId, start, end, createdByAdminId);
     if (!check.available) {
       return NextResponse.json(
@@ -153,17 +212,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const counts = {
-      rentedTents: Number(rentedTents) || 0,
-      rentedCars: Number(rentedCars) || 0,
-      rentedBirds: Number(rentedBirds) || 0,
-      rentedRabbits: Number(rentedRabbits) || 0,
-    };
-
-    const settings = await getSystemSettings();
-    const totalAmount = calculateTotal(counts, pricesOf(settings));
-
-    // Generate unique sequential reservation number
     const count = await prisma.reservation.count();
     const reservationNumber = `RES-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`;
 
@@ -173,13 +221,18 @@ export async function POST(request: NextRequest) {
         campsiteId,
         customerName,
         customerPhone,
-        country: String(country || 'SA').toUpperCase(),
+        country: String(country || 'AE').toUpperCase(),
         guestCount: Number(guestCount) || 1,
-        ...counts,
+        rentedTents: hasTentsField(campsite.slug) ? Number(rentedTents) || 0 : 0,
+        rentedCars: Number(rentedCars) || 0,
+        rentedBirds: Number(rentedBirds) || 0,
+        rentedRabbits: Number(rentedRabbits) || 0,
+        rentedSalukis: Number(rentedSalukis) || 0,
+        rentedGazelles: Number(rentedGazelles) || 0,
+        visitPeriod: hasVisitPeriodField(campsite.slug) ? (visitPeriod as VisitPeriod) : null,
+        campType: hasCampTypeField(campsite.slug) ? String(campType) : null,
         notes,
-        totalAmount,
-        // A deposit agreed on the call stays informational: the booking is only
-        // confirmed once the money actually lands.
+        totalAmount: 0,
         depositAmount:
           depositAmount === undefined || depositAmount === null || depositAmount === ''
             ? null
@@ -196,7 +249,6 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Release the temporary lock held by this host
     await releaseLock(campsiteId, createdByAdminId);
 
     await logAuditAction({
@@ -215,32 +267,35 @@ export async function POST(request: NextRequest) {
         'guestCount',
         'startDate',
         'endDate',
+        'visitPeriod',
+        'campType',
         'rentedTents',
         'rentedCars',
         'rentedBirds',
         'rentedRabbits',
-        'totalAmount',
+        'rentedSalukis',
+        'rentedGazelles',
         'depositAmount',
         'notes',
         'status',
       ]),
     });
 
-    const formattedRes = {
-      ...reservation,
-      startDate: reservation.startDate.toISOString(),
-      endDate: reservation.endDate.toISOString(),
-      createdAt: reservation.createdAt.toISOString(),
-      updatedAt: reservation.updatedAt.toISOString(),
-    };
+    const names = await hostNameMap([reservation.createdByAdminId]);
+    const formattedRes = formatReservation(reservation, names);
 
-    // Broadcast new reservation to all connected clients
     broadcastRealtimeEvent({
       type: 'RESERVATION_CREATED',
       payload: formattedRes,
     });
 
-    return NextResponse.json({ success: true, reservation: formattedRes });
+    return NextResponse.json({
+      success: true,
+      reservation: formattedRes,
+      bookedCampTypes: hasCampTypeField(campsite.slug)
+        ? await bookedCampTypesForRange(campsiteId, start, end)
+        : [],
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });

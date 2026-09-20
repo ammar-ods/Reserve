@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { broadcastRealtimeEvent, checkCapacityAvailability } from '@/lib/realtime';
+import { broadcastRealtimeEvent, checkCampTypeAvailability, checkCapacityAvailability } from '@/lib/realtime';
 import { buildChanges, logAuditAction } from '@/lib/audit';
-import { getSystemSettings, pricesOf } from '@/lib/settings';
-import { calculateTotal } from '@/lib/pricing';
-import { ActionType, Prisma, ReservationStatus, Role } from '@prisma/client';
+import { ActionType, Prisma, ReservationStatus, Role, VisitPeriod } from '@prisma/client';
+import { hasCampTypeField, hasTentsField, hasVisitPeriodField, isDayUse, isPrivateCampTypeId } from '@/lib/campsites';
+import { isValidBookingRange } from '@/lib/dates';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,11 +15,14 @@ const TRACKED_FIELDS = [
   'guestCount',
   'startDate',
   'endDate',
+  'visitPeriod',
+  'campType',
   'rentedTents',
   'rentedCars',
   'rentedBirds',
   'rentedRabbits',
-  'totalAmount',
+  'rentedSalukis',
+  'rentedGazelles',
   'depositAmount',
   'notes',
   'status',
@@ -29,6 +32,14 @@ function toOptionalNumber(value: unknown): number | null | undefined {
   if (value === undefined) return undefined;
   if (value === null || value === '') return null;
   return Math.max(0, Number(value) || 0);
+}
+
+async function createdByName(adminId: string): Promise<string> {
+  const user = await prisma.user.findUnique({
+    where: { adminId },
+    select: { name: true, username: true },
+  });
+  return user?.name || user?.username || adminId;
 }
 
 export async function PATCH(
@@ -49,6 +60,7 @@ export async function PATCH(
       return NextResponse.json({ success: false, error: 'NOT_FOUND' }, { status: 404 });
     }
 
+    const slug = current.campsite.slug;
     const data: Prisma.ReservationUpdateInput = {};
 
     if (typeof body.customerName === 'string' && body.customerName.trim()) {
@@ -72,31 +84,35 @@ export async function PATCH(
       data.depositAmount = deposit;
     }
 
-    // Rented item counts drive the auto-calculated total, so they are handled together.
-    const countFields = ['rentedTents', 'rentedCars', 'rentedBirds', 'rentedRabbits'] as const;
-    const hasCountUpdate = countFields.some((f) => body[f] !== undefined);
-    const counts = {
-      rentedTents: body.rentedTents !== undefined ? Math.max(0, Number(body.rentedTents) || 0) : current.rentedTents,
-      rentedCars: body.rentedCars !== undefined ? Math.max(0, Number(body.rentedCars) || 0) : current.rentedCars,
-      rentedBirds: body.rentedBirds !== undefined ? Math.max(0, Number(body.rentedBirds) || 0) : current.rentedBirds,
-      rentedRabbits:
-        body.rentedRabbits !== undefined ? Math.max(0, Number(body.rentedRabbits) || 0) : current.rentedRabbits,
-    };
-
-    if (hasCountUpdate) {
-      Object.assign(data, counts);
-      const settings = await getSystemSettings();
-      data.totalAmount = calculateTotal(counts, pricesOf(settings));
+    const countFields = [
+      'rentedTents',
+      'rentedCars',
+      'rentedBirds',
+      'rentedRabbits',
+      'rentedSalukis',
+      'rentedGazelles',
+    ] as const;
+    for (const field of countFields) {
+      if (body[field] !== undefined) {
+        const value = Math.max(0, Number(body[field]) || 0);
+        data[field] = field === 'rentedTents' && !hasTentsField(slug) ? 0 : value;
+      }
     }
 
-    // Date changes must respect the campsite daily cap all over again.
+    if (hasVisitPeriodField(slug) && body.visitPeriod !== undefined) {
+      if (body.visitPeriod !== 'MORNING' && body.visitPeriod !== 'EVENING') {
+        return NextResponse.json({ success: false, error: 'MISSING_PERIOD' }, { status: 400 });
+      }
+      data.visitPeriod = body.visitPeriod as VisitPeriod;
+    }
+
     let nextStart = current.startDate;
     let nextEnd = current.endDate;
     if (body.startDate || body.endDate) {
       nextStart = body.startDate ? new Date(body.startDate) : current.startDate;
       nextEnd = body.endDate ? new Date(body.endDate) : current.endDate;
 
-      if (isNaN(nextStart.getTime()) || isNaN(nextEnd.getTime()) || nextStart >= nextEnd) {
+      if (!isValidBookingRange(nextStart, nextEnd, isDayUse(slug))) {
         return NextResponse.json({ success: false, error: 'INVALID_DATES' }, { status: 400 });
       }
 
@@ -120,6 +136,27 @@ export async function PATCH(
         data.startDate = nextStart;
         data.endDate = nextEnd;
       }
+    }
+
+    if (hasCampTypeField(slug) && (body.campType !== undefined || body.startDate || body.endDate)) {
+      const nextType = body.campType !== undefined ? String(body.campType) : current.campType;
+      if (!nextType || !isPrivateCampTypeId(nextType)) {
+        return NextResponse.json({ success: false, error: 'MISSING_CAMP_TYPE' }, { status: 400 });
+      }
+      const typeCheck = await checkCampTypeAvailability(
+        current.campsiteId,
+        nextType,
+        nextStart,
+        nextEnd,
+        current.id
+      );
+      if (!typeCheck.available) {
+        return NextResponse.json(
+          { success: false, error: 'CAMP_TYPE_TAKEN', congestedDate: typeCheck.congestedDate },
+          { status: 409 }
+        );
+      }
+      data.campType = nextType;
     }
 
     const previousStatus = current.status;
@@ -172,13 +209,13 @@ export async function PATCH(
 
     const formatted = {
       ...updated,
+      createdByName: await createdByName(updated.createdByAdminId),
       startDate: updated.startDate.toISOString(),
       endDate: updated.endDate.toISOString(),
       createdAt: updated.createdAt.toISOString(),
       updatedAt: updated.updatedAt.toISOString(),
     };
 
-    // Broadcast update in real time to all hosts
     broadcastRealtimeEvent({
       type: 'RESERVATION_UPDATED',
       payload: formatted,
@@ -221,18 +258,21 @@ export async function DELETE(
       targetLabel: `${current.reservationNumber} · ${current.customerName}`,
       campsiteName: current.campsite.name,
       details: `حذف الحجز ${current.reservationNumber} للزائر ${current.customerName}`,
-      changes: buildChanges(
-        current as unknown as Record<string, unknown>,
-        {},
-        ['customerName', 'customerPhone', 'country', 'guestCount', 'totalAmount', 'depositAmount', 'status']
-      ),
+      changes: buildChanges(current as unknown as Record<string, unknown>, {}, [
+        'customerName',
+        'customerPhone',
+        'country',
+        'guestCount',
+        'depositAmount',
+        'status',
+      ]),
     });
 
-    // Broadcast cancellation/removal
     broadcastRealtimeEvent({
       type: 'RESERVATION_UPDATED',
       payload: {
         ...current,
+        createdByName: await createdByName(current.createdByAdminId),
         status: 'CANCELLED',
         startDate: current.startDate.toISOString(),
         endDate: current.endDate.toISOString(),

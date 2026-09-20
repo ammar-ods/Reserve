@@ -41,9 +41,9 @@ export async function POST(request: NextRequest) {
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
       return NextResponse.json(
-        { success: false, error: 'Invalid dates. End date must be after start date.' },
+        { success: false, error: 'Invalid dates. End date must be on or after start date.' },
         { status: 400 }
       );
     }

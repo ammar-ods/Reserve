@@ -9,11 +9,8 @@ export async function GET(request: NextRequest) {
     const role = searchParams.get('role');
 
     // Restrict access exclusively to Super Admin per specification
-    if (role !== 'SUPER_ADMIN') {
-      return NextResponse.json(
-        { success: false, error: 'Access denied: Audit log is viewed exclusively by the Super Admin.' },
-        { status: 403 }
-      );
+    if (role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
+      return NextResponse.json({ success: false, error: 'FORBIDDEN' }, { status: 403 });
     }
 
     const logs = await prisma.auditLog.findMany({

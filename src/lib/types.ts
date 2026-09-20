@@ -2,6 +2,8 @@ export type Role = 'SUPER_ADMIN' | 'ADMIN' | 'HOST';
 
 export type ReservationStatus = 'PENDING' | 'CONFIRMED' | 'CANCELLED';
 
+export type VisitPeriod = 'MORNING' | 'EVENING';
+
 export type ActionType =
   | 'CREATE'
   | 'UPDATE'
@@ -58,6 +60,10 @@ export interface ReservationDTO {
   rentedCars: number;
   rentedBirds: number;
   rentedRabbits: number;
+  rentedSalukis: number;
+  rentedGazelles: number;
+  visitPeriod: VisitPeriod | null;
+  campType: string | null;
   notes: string | null;
   totalAmount: number;
   depositAmount: number | null;
@@ -65,6 +71,7 @@ export interface ReservationDTO {
   endDate: string; // ISO string
   status: ReservationStatus;
   createdByAdminId: string;
+  createdByName: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -86,16 +93,17 @@ export interface ItemPrices {
   priceRabbit: number;
 }
 
-export interface SystemSettingsDTO extends ItemPrices {
+export interface SystemSettingsDTO {
   id: string;
   pageTitle: string;
   tableHeaders: {
     colId: string;
     colCustomer: string;
     colDates: string;
+    colCheckIn: string;
+    colCheckOut: string;
     colGuests: string;
     colItems: string;
-    colTotal: string;
     colDeposit: string;
     colStatus: string;
     colHost: string;
@@ -107,7 +115,8 @@ export interface SystemSettingsDTO extends ItemPrices {
 
 export interface CountryCount {
   code: string;
-  count: number;
+  bookings: number;
+  guests: number;
 }
 
 export interface StatsData {
@@ -117,6 +126,8 @@ export interface StatsData {
   rentedTents: number;
   rentedBirds: number;
   rentedRabbits: number;
+  rentedSalukis: number;
+  rentedGazelles: number;
   pendingCount: number;
   confirmedCount: number;
   cancelledCount: number;

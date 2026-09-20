@@ -19,7 +19,7 @@ export const TRANSLATIONS: Record<string, { ar: string; en: string }> = {
 
   // Navbar
   'nav.dashboard': { ar: 'الرئيسية', en: 'Dashboard' },
-  'nav.auditLog': { ar: 'سجل العمليات', en: 'Audit Log' },
+  'nav.auditLog': { ar: 'سجل النظام', en: 'System log' },
   'nav.settings': { ar: 'الإعدادات', en: 'Settings' },
   'nav.logout': { ar: 'تسجيل الخروج', en: 'Logout' },
   'nav.live': { ar: 'متصل', en: 'Live' },
