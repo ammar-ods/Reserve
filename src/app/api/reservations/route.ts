@@ -215,8 +215,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const count = await prisma.reservation.count();
-    const reservationNumber = `RES-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`;
+    // Use the highest existing sequence for this year — count() collides after deletes.
+    const year = new Date().getFullYear();
+    const prefix = `RES-${year}-`;
+    const latest = await prisma.reservation.findFirst({
+      where: { reservationNumber: { startsWith: prefix } },
+      orderBy: { reservationNumber: 'desc' },
+      select: { reservationNumber: true },
+    });
+    const lastSeq = latest
+      ? parseInt(latest.reservationNumber.slice(prefix.length), 10)
+      : 0;
+    const nextSeq = (Number.isFinite(lastSeq) ? lastSeq : 0) + 1;
+    const reservationNumber = `${prefix}${String(nextSeq).padStart(4, '0')}`;
 
     const reservation = await prisma.reservation.create({
       data: {
