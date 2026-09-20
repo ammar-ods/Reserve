@@ -59,6 +59,7 @@ export interface ReservationDTO {
   rentedTents: number;
   rentedCars: number;
   rentedBirds: number;
+  rentedHoubara: number;
   rentedRabbits: number;
   rentedSalukis: number;
   rentedGazelles: number;
@@ -84,13 +85,6 @@ export interface ActiveLockDTO {
   startDate: string; // ISO string
   endDate: string; // ISO string
   expiresAt: string; // ISO string
-}
-
-export interface ItemPrices {
-  priceTent: number;
-  priceCar: number;
-  priceBird: number;
-  priceRabbit: number;
 }
 
 export interface SystemSettingsDTO {
@@ -125,6 +119,7 @@ export interface StatsData {
   rentedCars: number;
   rentedTents: number;
   rentedBirds: number;
+  rentedHoubara: number;
   rentedRabbits: number;
   rentedSalukis: number;
   rentedGazelles: number;

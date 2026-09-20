@@ -324,14 +324,37 @@ input:focus, select:focus, textarea:focus {
 
 .country-chip {
   display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
+  align-items: flex-start;
+  gap: 0.4rem;
   font-size: 0.78rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: var(--radius-full);
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius-md);
   background: var(--bg-surface-subtle);
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
+}
+
+.country-chip-flag {
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.country-chip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.country-chip-name {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+}
+
+.country-chip-metric {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.25;
 }
 
 .page-title {

@@ -29,6 +29,7 @@ export const DEFAULT_STATS: StatsData = {
   rentedCars: 0,
   rentedTents: 0,
   rentedBirds: 0,
+  rentedHoubara: 0,
   rentedRabbits: 0,
   rentedSalukis: 0,
   rentedGazelles: 0,

@@ -91,6 +91,9 @@ export default function ReservationTable({
     if (res.rentedBirds > 0) {
       chips.push({ key: 'birds', label: `${res.rentedBirds} ${t('stats.birds')}`, background: '#e0f2fe', color: '#0369a1' });
     }
+    if (res.rentedHoubara > 0) {
+      chips.push({ key: 'houbara', label: `${res.rentedHoubara} ${t('stats.houbara')}`, background: '#eef2ff', color: '#3730a3' });
+    }
     if (res.rentedSalukis > 0) {
       chips.push({ key: 'salukis', label: `${res.rentedSalukis} ${t('stats.salukis')}`, background: '#ffedd5', color: '#9a3412' });
     }

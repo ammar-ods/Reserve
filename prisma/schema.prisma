@@ -76,7 +76,8 @@ model Reservation {
   guestCount        Int               @default(1)
   rentedTents       Int               @default(0)
   rentedCars        Int               @default(0)
-  rentedBirds       Int               @default(0)
+  rentedBirds       Int               @default(0) // عدد الطيور
+  rentedHoubara     Int               @default(0) // عدد الحبارى
   rentedRabbits     Int               @default(0)
   rentedSalukis     Int               @default(0)
   rentedGazelles    Int               @default(0)

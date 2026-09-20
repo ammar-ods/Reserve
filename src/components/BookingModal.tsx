@@ -24,7 +24,6 @@ import { COUNTRIES, GCC_COUNTRY_CODES, countryFlag } from '@/lib/countries';
 import { CampsiteDTO, UserSession, ActiveLockDTO, ReservationDTO, VisitPeriod } from '@/lib/types';
 import {
   PRIVATE_CAMP_TYPES,
-  campTypeLabel,
   hasCampTypeField,
   hasTentsField,
   hasVisitPeriodField,
@@ -73,6 +72,7 @@ export default function BookingModal({
   const [rentedTents, setRentedTents] = useState<number>(0);
   const [rentedCars, setRentedCars] = useState<number>(0);
   const [rentedBirds, setRentedBirds] = useState<number>(0);
+  const [rentedHoubara, setRentedHoubara] = useState<number>(0);
   const [rentedRabbits, setRentedRabbits] = useState<number>(0);
   const [rentedSalukis, setRentedSalukis] = useState<number>(0);
   const [rentedGazelles, setRentedGazelles] = useState<number>(0);
@@ -102,6 +102,7 @@ export default function BookingModal({
       setRentedTents(reservation.rentedTents);
       setRentedCars(reservation.rentedCars);
       setRentedBirds(reservation.rentedBirds);
+      setRentedHoubara(reservation.rentedHoubara || 0);
       setRentedRabbits(reservation.rentedRabbits);
       setRentedSalukis(reservation.rentedSalukis || 0);
       setRentedGazelles(reservation.rentedGazelles || 0);
@@ -124,6 +125,7 @@ export default function BookingModal({
     setRentedTents(0);
     setRentedCars(0);
     setRentedBirds(0);
+    setRentedHoubara(0);
     setRentedRabbits(0);
     setRentedSalukis(0);
     setRentedGazelles(0);
@@ -330,6 +332,7 @@ export default function BookingModal({
       rentedTents: hasTentsField(campsite.slug) ? Number(rentedTents) : 0,
       rentedCars: Number(rentedCars),
       rentedBirds: Number(rentedBirds),
+      rentedHoubara: Number(rentedHoubara),
       rentedRabbits: Number(rentedRabbits),
       rentedSalukis: Number(rentedSalukis),
       rentedGazelles: Number(rentedGazelles),
@@ -657,6 +660,16 @@ export default function BookingModal({
                     min="0"
                     value={rentedBirds}
                     onChange={(e) => setRentedBirds(Math.max(0, parseInt(e.target.value) || 0))}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">{t('field.houbara')}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={rentedHoubara}
+                    onChange={(e) => setRentedHoubara(Math.max(0, parseInt(e.target.value) || 0))}
                   />
                 </div>
 

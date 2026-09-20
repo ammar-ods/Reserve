@@ -44,7 +44,7 @@ export const TRANSLATIONS: Record<string, { ar: string; en: string }> = {
   'site.back': { ar: 'رجوع إلى المخيمات', en: 'Back to campsites' },
   'site.newBooking': { ar: 'حجز جديد', en: 'New booking' },
   'site.reservations': { ar: 'الحجوزات', en: 'Reservations' },
-  'site.settings': { ar: 'الحدود والأسعار', en: 'Caps & prices' },
+  'site.settings': { ar: 'الحدود اليومية', en: 'Daily caps' },
   'site.loading': { ar: 'جارٍ تحميل بيانات المخيم...', en: 'Loading campsite data...' },
 
   // Stats
@@ -55,6 +55,7 @@ export const TRANSLATIONS: Record<string, { ar: string; en: string }> = {
   'stats.tents': { ar: 'الخيام', en: 'Tents' },
   'stats.cars': { ar: 'السيارات', en: 'Cars' },
   'stats.birds': { ar: 'الطيور', en: 'Birds' },
+  'stats.houbara': { ar: 'الحبارى', en: 'Houbara' },
   'stats.salukis': { ar: 'السلوقي', en: 'Salukis' },
   'stats.gazelles': { ar: 'الظبيان', en: 'Gazelles' },
   'stats.rabbits': { ar: 'الأرانب البرية', en: 'Wild rabbits' },
@@ -137,6 +138,7 @@ export const TRANSLATIONS: Record<string, { ar: string; en: string }> = {
   'field.tents': { ar: 'عدد الخيام', en: 'Tents count' },
   'field.cars': { ar: 'عدد السيارات', en: 'Cars count' },
   'field.birds': { ar: 'عدد الطيور', en: 'Birds count' },
+  'field.houbara': { ar: 'عدد الحبارى', en: 'Houbara count' },
   'field.salukis': { ar: 'عدد السلوقي', en: 'Salukis count' },
   'field.gazelles': { ar: 'عدد الظبيان', en: 'Gazelles count' },
   'field.rabbits': { ar: 'عدد الأرانب البرية', en: 'Wild rabbits count' },

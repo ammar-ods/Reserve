@@ -21,6 +21,9 @@ export default function StatsBar({ stats, title, variant = 'site', campsiteSlug 
       ? [
           { key: 'reservations', label: t('stats.reservations'), value: String(stats.totalActiveReservations) },
           { key: 'guests', label: t('stats.guests'), value: String(stats.totalGuests) },
+          { key: 'salukis', label: t('stats.salukis'), value: String(stats.rentedSalukis) },
+          { key: 'houbara', label: t('stats.houbara'), value: String(stats.rentedHoubara) },
+          { key: 'rabbits', label: t('stats.rabbits'), value: String(stats.rentedRabbits) },
           { key: 'gazelles', label: t('stats.gazelles'), value: String(stats.rentedGazelles) },
           { key: 'deposits', label: t('stats.deposits'), value: formatMoney(stats.totalDeposits, lang) },
         ]
@@ -32,6 +35,7 @@ export default function StatsBar({ stats, title, variant = 'site', campsiteSlug 
             : []),
           { key: 'cars', label: t('stats.cars'), value: String(stats.rentedCars) },
           { key: 'birds', label: t('stats.birds'), value: String(stats.rentedBirds) },
+          { key: 'houbara', label: t('stats.houbara'), value: String(stats.rentedHoubara) },
           { key: 'salukis', label: t('stats.salukis'), value: String(stats.rentedSalukis) },
           { key: 'gazelles', label: t('stats.gazelles'), value: String(stats.rentedGazelles) },
           { key: 'rabbits', label: t('stats.rabbits'), value: String(stats.rentedRabbits) },
