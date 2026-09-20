@@ -292,7 +292,7 @@ export default function SiteDetailsPage({
           currentUser={currentUser}
           activeLocks={activeLocks}
           existingReservations={reservations}
-          prices={settings}
+          prices={settings as any}
           reservation={editingReservation}
           onSaved={() => {
             loadSiteData();
