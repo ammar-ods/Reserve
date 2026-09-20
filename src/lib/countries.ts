@@ -5,11 +5,11 @@ export interface CountryOption {
 }
 
 // GCC countries are listed first: they represent nearly all of the reserve's visitors.
-export const GCC_COUNTRY_CODES = ['SA', 'AE', 'KW', 'QA', 'BH', 'OM'];
+export const GCC_COUNTRY_CODES = ['AE', 'SA', 'KW', 'QA', 'BH', 'OM'];
 
 export const COUNTRIES: CountryOption[] = [
-  { code: 'SA', ar: 'المملكة العربية السعودية', en: 'Saudi Arabia' },
   { code: 'AE', ar: 'الإمارات العربية المتحدة', en: 'United Arab Emirates' },
+  { code: 'SA', ar: 'المملكة العربية السعودية', en: 'Saudi Arabia' },
   { code: 'KW', ar: 'الكويت', en: 'Kuwait' },
   { code: 'QA', ar: 'قطر', en: 'Qatar' },
   { code: 'BH', ar: 'البحرين', en: 'Bahrain' },

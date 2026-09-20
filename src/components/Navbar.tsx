@@ -64,8 +64,7 @@ export default function Navbar({
               {t('nav.dashboard')}
             </Link>
 
-            {/* Exclusive link for Super Admin per spec */}
-            {isSuperAdmin && (
+            {isAdminOrSuper && (
               <Link
                 href="/audit-log"
                 style={{

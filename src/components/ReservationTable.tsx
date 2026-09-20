@@ -8,11 +8,13 @@ import { ReservationDTO, SystemSettingsDTO, UserSession } from '@/lib/types';
 import { exportReservationsToExcel } from '@/lib/export';
 import { formatMoney } from '@/lib/i18n';
 import { countryFlag, countryName } from '@/lib/countries';
+import { campTypeLabel, hasTentsField } from '@/lib/campsites';
 
 interface ReservationTableProps {
   reservations: ReservationDTO[];
   headers?: SystemSettingsDTO['tableHeaders'];
   siteName?: string;
+  campsiteSlug?: string;
   currentUser: UserSession | null;
   onConfirmRequest: (res: ReservationDTO) => void;
   onCancel: (res: ReservationDTO) => Promise<void>;
@@ -23,6 +25,7 @@ export default function ReservationTable({
   reservations,
   headers,
   siteName = '',
+  campsiteSlug,
   onConfirmRequest,
   onCancel,
   onEdit,
@@ -32,20 +35,19 @@ export default function ReservationTable({
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'CONFIRMED' | 'PENDING' | 'CANCELLED'>('ALL');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  // Admin-renamed headers apply to the Arabic production view; the Super Admin's
-  // English view falls back to the built-in labels.
   const col = (key: keyof SystemSettingsDTO['tableHeaders'], translationKey: string) =>
     lang === 'ar' ? headers?.[key] || t(translationKey) : t(translationKey);
 
   const filtered = reservations.filter((res) => {
     const matchesStatus = statusFilter === 'ALL' || res.status === statusFilter;
     const term = searchTerm.toLowerCase();
+    const hostName = (res.createdByName || res.createdByAdminId).toLowerCase();
     const matchesSearch =
       !searchTerm ||
       res.customerName.toLowerCase().includes(term) ||
       res.reservationNumber.toLowerCase().includes(term) ||
       res.customerPhone.toLowerCase().includes(term) ||
-      res.createdByAdminId.toLowerCase().includes(term);
+      hostName.includes(term);
     return matchesStatus && matchesSearch;
   });
 
@@ -64,19 +66,45 @@ export default function ReservationTable({
 
   const items = (res: ReservationDTO) => {
     const chips: { key: string; label: string; background: string; color: string }[] = [];
-    if (res.rentedTents > 0)
+    if (res.campType) {
+      chips.push({
+        key: 'campType',
+        label: campTypeLabel(res.campType, lang),
+        background: '#ecfeff',
+        color: '#155e75',
+      });
+    }
+    if (res.visitPeriod) {
+      chips.push({
+        key: 'period',
+        label: t(`period.${res.visitPeriod}`),
+        background: '#fef9c3',
+        color: '#854d0e',
+      });
+    }
+    if (hasTentsField(campsiteSlug || res.campsite?.slug) && res.rentedTents > 0) {
       chips.push({ key: 'tents', label: `${res.rentedTents} ${t('stats.tents')}`, background: '#fef3c7', color: '#92400e' });
-    if (res.rentedCars > 0)
+    }
+    if (res.rentedCars > 0) {
       chips.push({ key: 'cars', label: `${res.rentedCars} ${t('stats.cars')}`, background: '#f3e8ff', color: '#6b21a8' });
-    if (res.rentedBirds > 0)
+    }
+    if (res.rentedBirds > 0) {
       chips.push({ key: 'birds', label: `${res.rentedBirds} ${t('stats.birds')}`, background: '#e0f2fe', color: '#0369a1' });
-    if (res.rentedRabbits > 0)
+    }
+    if (res.rentedSalukis > 0) {
+      chips.push({ key: 'salukis', label: `${res.rentedSalukis} ${t('stats.salukis')}`, background: '#ffedd5', color: '#9a3412' });
+    }
+    if (res.rentedGazelles > 0) {
+      chips.push({ key: 'gazelles', label: `${res.rentedGazelles} ${t('stats.gazelles')}`, background: '#dcfce7', color: '#166534' });
+    }
+    if (res.rentedRabbits > 0) {
       chips.push({
         key: 'rabbits',
         label: `${res.rentedRabbits} ${t('stats.rabbits')}`,
         background: '#fce7f3',
         color: '#9d174d',
       });
+    }
     return chips;
   };
 
@@ -124,10 +152,10 @@ export default function ReservationTable({
             <tr>
               <th>{col('colId', 'col.id')}</th>
               <th>{col('colCustomer', 'col.customer')}</th>
-              <th>{col('colDates', 'col.dates')}</th>
+              <th>{col('colCheckIn', 'col.checkIn')}</th>
+              <th>{col('colCheckOut', 'col.checkOut')}</th>
               <th>{col('colGuests', 'col.guests')}</th>
               <th>{col('colItems', 'col.items')}</th>
-              <th>{col('colTotal', 'col.total')}</th>
               <th>{col('colDeposit', 'col.deposit')}</th>
               <th>{col('colStatus', 'col.status')}</th>
               <th>{col('colHost', 'col.host')}</th>
@@ -168,11 +196,11 @@ export default function ReservationTable({
                       )}
                     </td>
 
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{format(new Date(res.startDate), 'dd MMM yyyy', { locale: dateLocale })}</div>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                        {t('table.to')} {format(new Date(res.endDate), 'dd MMM yyyy', { locale: dateLocale })}
-                      </div>
+                    <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      {format(new Date(res.startDate), 'dd MMM yyyy', { locale: dateLocale })}
+                    </td>
+                    <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      {format(new Date(res.endDate), 'dd MMM yyyy', { locale: dateLocale })}
                     </td>
 
                     <td style={{ fontWeight: 600 }}>{res.guestCount}</td>
@@ -200,8 +228,6 @@ export default function ReservationTable({
                       </div>
                     </td>
 
-                    <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{formatMoney(res.totalAmount, lang)}</td>
-
                     <td style={{ whiteSpace: 'nowrap' }}>
                       {res.depositAmount === null ? (
                         <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{t('deposit.none')}</span>
@@ -220,7 +246,7 @@ export default function ReservationTable({
                     </td>
 
                     <td>
-                      <span className="host-tag">{res.createdByAdminId}</span>
+                      <span className="host-tag">{res.createdByName || res.createdByAdminId}</span>
                     </td>
 
                     <td style={{ textAlign: 'end' }}>

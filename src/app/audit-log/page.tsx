@@ -30,8 +30,7 @@ export default function AuditLogPage() {
     }
     try {
       const user = JSON.parse(saved);
-      if (user.role !== 'SUPER_ADMIN') {
-        // Exclusively viewed by Super Admin
+      if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
         router.push('/dashboard');
         return;
       }
