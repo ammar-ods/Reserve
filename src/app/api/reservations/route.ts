@@ -286,7 +286,7 @@ export async function POST(request: NextRequest) {
 
     broadcastRealtimeEvent({
       type: 'RESERVATION_CREATED',
-      payload: formattedRes,
+      payload: formattedRes as any,
     });
 
     return NextResponse.json({
