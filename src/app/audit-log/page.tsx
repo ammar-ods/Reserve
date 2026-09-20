@@ -41,10 +41,11 @@ export default function AuditLogPage() {
   }, [router]);
 
   const loadLogs = useCallback(async () => {
+    if (!currentUser) return;
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/audit-logs?role=SUPER_ADMIN');
+      const res = await fetch(`/api/audit-logs?role=${currentUser.role}`);
       const data = await res.json();
       if (data.success) {
         setLogs(data.logs);
@@ -56,10 +57,10 @@ export default function AuditLogPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [lang, t]);
+  }, [currentUser, lang, t]);
 
   useEffect(() => {
-    if (currentUser && currentUser.role === 'SUPER_ADMIN') {
+    if (currentUser && (currentUser.role === 'SUPER_ADMIN' || currentUser.role === 'ADMIN')) {
       loadLogs();
     }
   }, [currentUser, loadLogs]);
@@ -77,7 +78,7 @@ export default function AuditLogPage() {
     );
   });
 
-  if (!currentUser || currentUser.role !== 'SUPER_ADMIN') return null;
+  if (!currentUser || (currentUser.role !== 'SUPER_ADMIN' && currentUser.role !== 'ADMIN')) return null;
 
   return (
     <div className="app-container">

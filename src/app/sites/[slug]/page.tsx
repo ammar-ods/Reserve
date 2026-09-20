@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, use } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, ArrowLeft, Sliders } from 'lucide-react';
+import { Plus, ArrowLeft } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import StatsBar from '@/components/StatsBar';
 import ReservationTable from '@/components/ReservationTable';
@@ -175,8 +175,6 @@ export default function SiteDetailsPage({
     );
   }
 
-  const isAdminOrSuper = currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN';
-
   return (
     <div className="app-container">
       <Navbar
@@ -213,18 +211,6 @@ export default function SiteDetailsPage({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              {isAdminOrSuper && (
-                <>
-                  <span className="campsite-capacity-badge">
-                    {t('card.cap')}: <strong>{campsite.dailyCapacity}</strong>
-                  </span>
-                  <button onClick={() => setIsAdminSettingsOpen(true)} className="btn btn-secondary btn-sm">
-                    <Sliders size={15} />
-                    <span>{t('site.settings')}</span>
-                  </button>
-                </>
-              )}
-
               <button
                 onClick={() => {
                   setEditingReservation(null);
@@ -239,7 +225,7 @@ export default function SiteDetailsPage({
           </div>
         </div>
 
-        <StatsBar stats={stats} title={t('stats.site')} />
+        <StatsBar stats={stats} title={t('stats.site')} variant="site" campsiteSlug={campsite.slug} />
 
         <div style={{ marginBottom: '4rem' }}>
           <h2 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -256,6 +242,7 @@ export default function SiteDetailsPage({
             reservations={reservations}
             headers={settings.tableHeaders}
             siteName={campsite.name}
+            campsiteSlug={campsite.slug}
             currentUser={currentUser}
             onConfirmRequest={(res) => setConfirmingReservation(res)}
             onCancel={async (res) => {
@@ -292,7 +279,6 @@ export default function SiteDetailsPage({
           currentUser={currentUser}
           activeLocks={activeLocks}
           existingReservations={reservations}
-          prices={settings as any}
           reservation={editingReservation}
           onSaved={() => {
             loadSiteData();
