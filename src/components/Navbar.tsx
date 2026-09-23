@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { Tent, ShieldCheck, LogOut, Sliders, Languages } from 'lucide-react';
+import { ShieldCheck, LogOut, Sliders, Languages } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 import { useLang } from './LanguageProvider';
 import { UserSession } from '@/lib/types';
@@ -36,21 +36,7 @@ export default function Navbar({
       <div className="navbar-inner">
         <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
           <Link href="/dashboard" className="brand-logo">
-            <div
-              style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '8px',
-                background: 'var(--primary)',
-                color: '#fff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Tent size={20} />
-            </div>
-            <span>{t('brand.place')}</span>
+            <img src="/logo.png" alt={t('brand.place')} className="brand-logo-img" />
           </Link>
 
           <nav style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.9rem' }}>
