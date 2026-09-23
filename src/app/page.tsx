@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Tent, ArrowLeft } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import { useLang } from '@/components/LanguageProvider';
 import { translateError } from '@/lib/i18n';
@@ -91,34 +91,17 @@ export default function LandingPage() {
           textAlign: 'center',
         }}
       >
-        <div
+        <img
+          src="/logo.png"
+          alt={t('brand.place')}
           style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '16px',
-            background: 'var(--primary)',
-            color: '#ffffff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 10px 25px rgba(15, 118, 110, 0.3)',
-            marginBottom: '1.25rem',
-          }}
-        >
-          <Tent size={36} />
-        </div>
-
-        <h1
-          style={{
-            fontSize: '2rem',
-            fontWeight: 800,
-            letterSpacing: '-0.02em',
+            height: '88px',
+            width: 'auto',
+            maxWidth: '100%',
+            objectFit: 'contain',
             marginBottom: '2rem',
-            color: 'var(--text-primary)',
           }}
-        >
-          {t('brand.place')}
-        </h1>
+        />
 
         <div
           style={{
