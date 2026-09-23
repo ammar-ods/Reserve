@@ -148,7 +148,7 @@ input:focus, select:focus, textarea:focus {
 
 .main-content {
   flex: 1;
-  max-width: 1280px;
+  max-width: 1560px;
   width: 100%;
   margin: 0 auto;
   padding: 2rem 1.5rem;
@@ -166,7 +166,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .navbar-inner {
-  max-width: 1280px;
+  max-width: 1560px;
   height: 100%;
   margin: 0 auto;
   padding: 0 1.5rem;
@@ -552,12 +552,6 @@ input:focus, select:focus, textarea:focus {
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-}
-
-@media (min-width: 1024px) {
-  .table-responsive {
-    overflow-x: visible;
-  }
 }
 
 .reserve-table {
