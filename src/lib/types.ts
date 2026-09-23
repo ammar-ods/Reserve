@@ -2,6 +2,8 @@ export type Role = 'SUPER_ADMIN' | 'ADMIN' | 'HOST';
 
 export type ReservationStatus = 'PENDING' | 'CONFIRMED' | 'CANCELLED';
 
+export type VisitPeriod = 'MORNING' | 'EVENING';
+
 export type ActionType =
   | 'CREATE'
   | 'UPDATE'
@@ -36,6 +38,8 @@ export interface CampsiteDTO {
   name: string;
   description: string | null;
   dailyCapacity: number;
+  morningCapacity: number;
+  eveningCapacity: number;
   iconName: string;
   activeReservationsCount?: number;
   activeLocksCount?: number;
@@ -57,7 +61,12 @@ export interface ReservationDTO {
   rentedTents: number;
   rentedCars: number;
   rentedBirds: number;
+  rentedHoubara: number;
   rentedRabbits: number;
+  rentedSalukis: number;
+  rentedGazelles: number;
+  visitPeriod: VisitPeriod | null;
+  campType: string | null;
   notes: string | null;
   totalAmount: number;
   depositAmount: number | null;
@@ -65,6 +74,7 @@ export interface ReservationDTO {
   endDate: string; // ISO string
   status: ReservationStatus;
   createdByAdminId: string;
+  createdByName: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -74,28 +84,23 @@ export interface ActiveLockDTO {
   campsiteId: string;
   hostAdminId: string;
   hostName: string;
+  visitPeriod: VisitPeriod | null;
   startDate: string; // ISO string
   endDate: string; // ISO string
   expiresAt: string; // ISO string
 }
 
-export interface ItemPrices {
-  priceTent: number;
-  priceCar: number;
-  priceBird: number;
-  priceRabbit: number;
-}
-
-export interface SystemSettingsDTO extends ItemPrices {
+export interface SystemSettingsDTO {
   id: string;
   pageTitle: string;
   tableHeaders: {
     colId: string;
     colCustomer: string;
     colDates: string;
+    colCheckIn: string;
+    colCheckOut: string;
     colGuests: string;
     colItems: string;
-    colTotal: string;
     colDeposit: string;
     colStatus: string;
     colHost: string;
@@ -107,7 +112,8 @@ export interface SystemSettingsDTO extends ItemPrices {
 
 export interface CountryCount {
   code: string;
-  count: number;
+  bookings: number;
+  guests: number;
 }
 
 export interface StatsData {
@@ -116,7 +122,10 @@ export interface StatsData {
   rentedCars: number;
   rentedTents: number;
   rentedBirds: number;
+  rentedHoubara: number;
   rentedRabbits: number;
+  rentedSalukis: number;
+  rentedGazelles: number;
   pendingCount: number;
   confirmedCount: number;
   cancelledCount: number;

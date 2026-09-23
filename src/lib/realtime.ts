@@ -1,8 +1,9 @@
 import { EventEmitter } from 'events';
 import { prisma } from './prisma';
-import { RealtimeEvent, ActiveLockDTO } from './types';
+import { dateOccupiesDay, occupancyRange, rangesOverlap } from './dates';
+import { isDayUse, isPrivateCampTypeId, PRIVATE_CAMP_SLUG } from './campsites';
+import { RealtimeEvent, ActiveLockDTO, VisitPeriod } from './types';
 
-// Global Event Emitter for SSE broadcast across Next.js runtime
 declare global {
   // eslint-disable-next-line no-var
   var realtimeEmitter: EventEmitter | undefined;
@@ -14,23 +15,39 @@ if (process.env.NODE_ENV !== 'production') {
   globalThis.realtimeEmitter = realtimeEmitter;
 }
 
-// Broadcast an event to all connected SSE clients
 export function broadcastRealtimeEvent(event: RealtimeEvent) {
   realtimeEmitter.emit('message', event);
 }
 
-// Check capacity for each date in a range [startDate, endDate]
-// Returns true if date range has availability under dailyCapacity
+function occupiedOnDay(
+  items: { startDate: Date; endDate: Date; visitPeriod?: VisitPeriod | null }[],
+  day: Date,
+  period?: VisitPeriod | null
+) {
+  return items.filter((item) => {
+    if (!dateOccupiesDay(item.startDate, item.endDate, day)) return false;
+    if (period && item.visitPeriod !== period) return false;
+    return true;
+  }).length;
+}
+
 export async function checkCapacityAvailability(
   campsiteId: string,
   startDate: Date,
   endDate: Date,
   excludeHostAdminId?: string,
-  excludeReservationId?: string
+  excludeReservationId?: string,
+  visitPeriod?: VisitPeriod | null
 ): Promise<{ available: boolean; reason?: string; congestedDate?: string }> {
   const campsite = await prisma.campsite.findUnique({
     where: { id: campsiteId },
-    select: { dailyCapacity: true, name: true },
+    select: {
+      dailyCapacity: true,
+      morningCapacity: true,
+      eveningCapacity: true,
+      slug: true,
+      name: true,
+    },
   });
 
   if (!campsite) {
@@ -39,38 +56,32 @@ export async function checkCapacityAvailability(
 
   const now = new Date();
 
-  // Clean expired locks first
   await prisma.activeLock.deleteMany({
     where: {
       expiresAt: { lt: now },
     },
   });
 
-  // Query active (PENDING or CONFIRMED) reservations that overlap the date range
   const activeReservations = await prisma.reservation.findMany({
     where: {
       campsiteId,
       status: { in: ['PENDING', 'CONFIRMED'] },
       ...(excludeReservationId ? { id: { not: excludeReservationId } } : {}),
-      startDate: { lt: endDate },
-      endDate: { gt: startDate },
     },
     select: {
       id: true,
       startDate: true,
       endDate: true,
       customerName: true,
+      visitPeriod: true,
     },
   });
 
-  // Query active locks by other hosts that overlap
   const activeLocks = await prisma.activeLock.findMany({
     where: {
       campsiteId,
       expiresAt: { gt: now },
       ...(excludeHostAdminId ? { hostAdminId: { not: excludeHostAdminId } } : {}),
-      startDate: { lt: endDate },
-      endDate: { gt: startDate },
     },
     select: {
       id: true,
@@ -78,35 +89,44 @@ export async function checkCapacityAvailability(
       endDate: true,
       hostAdminId: true,
       hostName: true,
+      visitPeriod: true,
     },
   });
 
-  // Iterate day by day from startDate to endDate
-  const current = new Date(startDate);
-  while (current < endDate) {
-    const dayStart = new Date(current);
-    const dayEnd = new Date(current);
-    dayEnd.setDate(dayEnd.getDate() + 1);
+  const dayUse = isDayUse(campsite.slug);
+  const periods: VisitPeriod[] = visitPeriod ? [visitPeriod] : dayUse ? ['MORNING', 'EVENING'] : [];
 
-    // Count reservations active on this day
-    const resCount = activeReservations.filter(
-      (r) => r.startDate < dayEnd && r.endDate > dayStart
-    ).length;
-
-    // Count locks held by others on this day
-    const lockCount = activeLocks.filter(
-      (l) => l.startDate < dayEnd && l.endDate > dayStart
-    ).length;
-
-    const totalOccupied = resCount + lockCount;
-
-    if (totalOccupied >= campsite.dailyCapacity) {
-      const dateStr = dayStart.toISOString().split('T')[0];
-      return {
-        available: false,
-        reason: `Daily capacity limit (${campsite.dailyCapacity}) reached for ${dateStr}. (Active: ${resCount}, In-progress holds: ${lockCount})`,
-        congestedDate: dateStr,
-      };
+  const range = occupancyRange(startDate, endDate);
+  const current = new Date(range.start);
+  while (current < range.end) {
+    if (dayUse) {
+      const blocked = periods.filter((period) => {
+        const cap = period === 'MORNING' ? campsite.morningCapacity : campsite.eveningCapacity;
+        const resCount = occupiedOnDay(activeReservations, current, period);
+        const lockCount = occupiedOnDay(activeLocks, current, period);
+        return resCount + lockCount >= cap;
+      });
+      // A specific period must be free. With no period yet, the day stays open while either period has room.
+      const allRequestedPeriodsFull = visitPeriod ? blocked.length > 0 : blocked.length === periods.length;
+      if (allRequestedPeriodsFull) {
+        const dateStr = current.toISOString().split('T')[0];
+        return {
+          available: false,
+          reason: 'CAPACITY_REACHED',
+          congestedDate: dateStr,
+        };
+      }
+    } else {
+      const resCount = occupiedOnDay(activeReservations, current);
+      const lockCount = occupiedOnDay(activeLocks, current);
+      if (resCount + lockCount >= campsite.dailyCapacity) {
+        const dateStr = current.toISOString().split('T')[0];
+        return {
+          available: false,
+          reason: `Daily capacity limit (${campsite.dailyCapacity}) reached for ${dateStr}. (Active: ${resCount}, In-progress holds: ${lockCount})`,
+          congestedDate: dateStr,
+        };
+      }
     }
 
     current.setDate(current.getDate() + 1);
@@ -115,23 +135,80 @@ export async function checkCapacityAvailability(
   return { available: true };
 }
 
-// Acquire or refresh a lock
+export async function checkCampTypeAvailability(
+  campsiteId: string,
+  campType: string,
+  startDate: Date,
+  endDate: Date,
+  excludeReservationId?: string
+): Promise<{ available: boolean; congestedDate?: string }> {
+  if (!isPrivateCampTypeId(campType)) {
+    return { available: false };
+  }
+
+  const overlapping = await prisma.reservation.findMany({
+    where: {
+      campsiteId,
+      campType,
+      status: { in: ['PENDING', 'CONFIRMED'] },
+      ...(excludeReservationId ? { id: { not: excludeReservationId } } : {}),
+    },
+    select: { startDate: true, endDate: true },
+  });
+
+  const clash = overlapping.find((r) => rangesOverlap(r.startDate, r.endDate, startDate, endDate));
+  if (!clash) return { available: true };
+
+  const range = occupancyRange(clash.startDate, clash.endDate);
+  return { available: false, congestedDate: range.start.toISOString().split('T')[0] };
+}
+
+export async function bookedCampTypesForRange(
+  campsiteId: string,
+  startDate: Date,
+  endDate: Date,
+  excludeReservationId?: string
+): Promise<string[]> {
+  const campsite = await prisma.campsite.findUnique({
+    where: { id: campsiteId },
+    select: { slug: true },
+  });
+  if (campsite?.slug !== PRIVATE_CAMP_SLUG) return [];
+
+  const reservations = await prisma.reservation.findMany({
+    where: {
+      campsiteId,
+      status: { in: ['PENDING', 'CONFIRMED'] },
+      campType: { not: null },
+      ...(excludeReservationId ? { id: { not: excludeReservationId } } : {}),
+    },
+    select: { campType: true, startDate: true, endDate: true },
+  });
+
+  const taken = new Set<string>();
+  for (const reservation of reservations) {
+    if (reservation.campType && rangesOverlap(reservation.startDate, reservation.endDate, startDate, endDate)) {
+      taken.add(reservation.campType);
+    }
+  }
+  return [...taken];
+}
+
 export async function acquireLock(params: {
   campsiteId: string;
   startDate: Date;
   endDate: Date;
   hostAdminId: string;
   hostName: string;
-}): Promise<{ success: boolean; lock?: ActiveLockDTO; error?: string }> {
-  const { campsiteId, startDate, endDate, hostAdminId, hostName } = params;
+  visitPeriod?: VisitPeriod | null;
+}): Promise<{ success: boolean; lock?: ActiveLockDTO; error?: string; congestedDate?: string }> {
+  const { campsiteId, startDate, endDate, hostAdminId, hostName, visitPeriod } = params;
 
-  // 1. Verify capacity availability
-  const check = await checkCapacityAvailability(campsiteId, startDate, endDate, hostAdminId);
+  const check = await checkCapacityAvailability(campsiteId, startDate, endDate, hostAdminId, undefined, visitPeriod);
   if (!check.available) {
-    return { success: false, error: check.reason };
+    return { success: false, error: check.reason, congestedDate: check.congestedDate };
   }
 
-  // 2. Remove existing lock held by this host for this campsite
   await prisma.activeLock.deleteMany({
     where: {
       campsiteId,
@@ -139,7 +216,6 @@ export async function acquireLock(params: {
     },
   });
 
-  // 3. Create new lock with 5-minute TTL
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
   const created = await prisma.activeLock.create({
     data: {
@@ -148,6 +224,7 @@ export async function acquireLock(params: {
       endDate,
       hostAdminId,
       hostName,
+      visitPeriod: visitPeriod || null,
       expiresAt,
     },
   });
@@ -157,12 +234,12 @@ export async function acquireLock(params: {
     campsiteId: created.campsiteId,
     hostAdminId: created.hostAdminId,
     hostName: created.hostName,
+    visitPeriod: created.visitPeriod,
     startDate: created.startDate.toISOString(),
     endDate: created.endDate.toISOString(),
     expiresAt: created.expiresAt.toISOString(),
   };
 
-  // 4. Broadcast to all active hosts
   broadcastRealtimeEvent({
     type: 'LOCK_ACQUIRED',
     payload: lockDTO,
@@ -171,7 +248,6 @@ export async function acquireLock(params: {
   return { success: true, lock: lockDTO };
 }
 
-// Release lock by campsite and hostAdminId
 export async function releaseLock(campsiteId: string, hostAdminId: string) {
   const deleted = await prisma.activeLock.deleteMany({
     where: {

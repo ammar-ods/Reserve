@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { logAuditAction, buildCreationSnapshot } from '@/lib/audit';
+import { logAuditAction, buildCreationSnapshot, buildChanges } from '@/lib/audit';
 import { hashPassword } from '@/lib/auth';
 import { ActionType, Role } from '@prisma/client';
 
@@ -32,9 +32,8 @@ export async function GET() {
   }
 }
 
-// Sequential Admin IDs keep the audit trail readable: ADM-01, HOST-01, ...
 async function nextAdminId(role: Role): Promise<string> {
-  const prefix = role === Role.ADMIN ? 'ADM' : 'HOST';
+  const prefix = role === Role.SUPER_ADMIN ? 'SA' : role === Role.ADMIN ? 'ADM' : 'HOST';
   const existing = await prisma.user.findMany({
     where: { adminId: { startsWith: `${prefix}-` } },
     select: { adminId: true },
@@ -53,7 +52,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { username, password, role, requesterRole, requesterAdminId, requesterName } = body;
 
-    // Both the Super Admin and any Admin can register new Admin / Host accounts.
     if (requesterRole !== 'SUPER_ADMIN' && requesterRole !== 'ADMIN') {
       return NextResponse.json({ success: false, error: 'FORBIDDEN' }, { status: 403 });
     }
@@ -69,7 +67,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'WEAK_PASSWORD' }, { status: 400 });
     }
 
-    if (role !== 'ADMIN' && role !== 'HOST') {
+    const allowedRoles =
+      requesterRole === 'SUPER_ADMIN' ? ['SUPER_ADMIN', 'ADMIN', 'HOST'] : ['ADMIN', 'HOST'];
+    if (!allowedRoles.includes(role)) {
       return NextResponse.json({ success: false, error: 'INVALID_ROLE' }, { status: 400 });
     }
 
@@ -116,6 +116,62 @@ export async function POST(request: NextRequest) {
         createdAt: newUser.createdAt.toISOString(),
       },
     });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { userId, requesterRole, requesterAdminId, requesterName } = body;
+
+    if (requesterRole !== 'SUPER_ADMIN') {
+      return NextResponse.json({ success: false, error: 'FORBIDDEN' }, { status: 403 });
+    }
+
+    if (!userId) {
+      return NextResponse.json({ success: false, error: 'MISSING_FIELDS' }, { status: 400 });
+    }
+
+    const target = await prisma.user.findUnique({ where: { id: userId } });
+    if (!target) {
+      return NextResponse.json({ success: false, error: 'NOT_FOUND' }, { status: 404 });
+    }
+
+    if (target.adminId === requesterAdminId) {
+      return NextResponse.json({ success: false, error: 'CANNOT_DELETE_SELF' }, { status: 400 });
+    }
+
+    if (target.role === Role.SUPER_ADMIN) {
+      const saCount = await prisma.user.count({ where: { role: Role.SUPER_ADMIN, isActive: true } });
+      if (saCount <= 1) {
+        return NextResponse.json({ success: false, error: 'LAST_SUPER_ADMIN' }, { status: 400 });
+      }
+    }
+
+    // Audit rows keep their text, but the account link is cleared so the delete can proceed.
+    await prisma.auditLog.updateMany({
+      where: { adminId: target.adminId },
+      data: { adminId: null },
+    });
+
+    await prisma.user.delete({ where: { id: target.id } });
+
+    await logAuditAction({
+      action: ActionType.DELETE,
+      adminId: requesterAdminId || 'SA-01',
+      userName: requesterName || requesterAdminId,
+      userRole: requesterRole as Role,
+      targetType: 'USER',
+      targetId: target.id,
+      targetLabel: `${target.username} (${target.adminId})`,
+      details: `حذف الحساب ${target.username} (${target.adminId})`,
+      changes: buildChanges(target as unknown as Record<string, unknown>, {}, ['username', 'role']),
+    });
+
+    return NextResponse.json({ success: true });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });

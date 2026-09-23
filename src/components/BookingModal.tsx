@@ -13,15 +13,23 @@ import {
   isSameMonth,
   isSameDay,
   isBefore,
+  isAfter,
   startOfDay,
   addDays,
 } from 'date-fns';
 import { X, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Lock, Check, AlertCircle } from 'lucide-react';
 import { useLang } from './LanguageProvider';
-import { formatMoney, translateError } from '@/lib/i18n';
-import { calculateTotal } from '@/lib/pricing';
+import { translateError } from '@/lib/i18n';
 import { COUNTRIES, GCC_COUNTRY_CODES, countryFlag } from '@/lib/countries';
-import { CampsiteDTO, UserSession, ActiveLockDTO, ReservationDTO, ItemPrices } from '@/lib/types';
+import { CampsiteDTO, UserSession, ActiveLockDTO, ReservationDTO, VisitPeriod } from '@/lib/types';
+import {
+  PRIVATE_CAMP_TYPES,
+  hasCampTypeField,
+  hasTentsField,
+  hasVisitPeriodField,
+  isDayUse,
+} from '@/lib/campsites';
+import { dateOccupiesDay, rangesOverlap } from '@/lib/dates';
 
 interface BookingModalProps {
   isOpen: boolean;
@@ -30,8 +38,6 @@ interface BookingModalProps {
   currentUser: UserSession | null;
   activeLocks: ActiveLockDTO[];
   existingReservations: ReservationDTO[];
-  prices: ItemPrices;
-  // When provided the modal edits that booking instead of creating a new one.
   reservation?: ReservationDTO | null;
   onSaved: (res: ReservationDTO) => void;
 }
@@ -43,38 +49,40 @@ export default function BookingModal({
   currentUser,
   activeLocks,
   existingReservations,
-  prices,
   reservation = null,
   onSaved,
 }: BookingModalProps) {
   const { t, lang, dateLocale } = useLang();
   const isEditMode = Boolean(reservation);
+  const dayUse = isDayUse(campsite.slug);
 
   const [step, setStep] = useState<1 | 2>(1);
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
-  // Step 1: Selected Dates & Lock State
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [isLocking, setIsLocking] = useState(false);
   const [lockAcquired, setLockAcquired] = useState(false);
   const [lockError, setLockError] = useState<string | null>(null);
 
-  // Step 2: Booking fields
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [country, setCountry] = useState('SA');
+  const [country, setCountry] = useState('AE');
   const [guestCount, setGuestCount] = useState<number>(2);
   const [rentedTents, setRentedTents] = useState<number>(0);
   const [rentedCars, setRentedCars] = useState<number>(0);
   const [rentedBirds, setRentedBirds] = useState<number>(0);
+  const [rentedHoubara, setRentedHoubara] = useState<number>(0);
   const [rentedRabbits, setRentedRabbits] = useState<number>(0);
+  const [rentedSalukis, setRentedSalukis] = useState<number>(0);
+  const [rentedGazelles, setRentedGazelles] = useState<number>(0);
+  const [visitPeriod, setVisitPeriod] = useState<VisitPeriod>('MORNING');
+  const [campType, setCampType] = useState('');
   const [depositAmount, setDepositAmount] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Load the booking being edited, or reset for a fresh booking
   useEffect(() => {
     if (!isOpen) return;
 
@@ -89,12 +97,17 @@ export default function BookingModal({
       setLockAcquired(true);
       setCustomerName(reservation.customerName);
       setCustomerPhone(reservation.customerPhone);
-      setCountry(reservation.country || 'SA');
+      setCountry(reservation.country || 'AE');
       setGuestCount(reservation.guestCount);
       setRentedTents(reservation.rentedTents);
       setRentedCars(reservation.rentedCars);
       setRentedBirds(reservation.rentedBirds);
+      setRentedHoubara(reservation.rentedHoubara || 0);
       setRentedRabbits(reservation.rentedRabbits);
+      setRentedSalukis(reservation.rentedSalukis || 0);
+      setRentedGazelles(reservation.rentedGazelles || 0);
+      setVisitPeriod(reservation.visitPeriod || 'MORNING');
+      setCampType(reservation.campType || '');
       setDepositAmount(reservation.depositAmount === null ? '' : String(reservation.depositAmount));
       setNotes(reservation.notes || '');
       return;
@@ -107,22 +120,43 @@ export default function BookingModal({
     setLockAcquired(false);
     setCustomerName('');
     setCustomerPhone('');
-    setCountry('SA');
+    setCountry('AE');
     setGuestCount(2);
     setRentedTents(0);
     setRentedCars(0);
     setRentedBirds(0);
+    setRentedHoubara(0);
     setRentedRabbits(0);
+    setRentedSalukis(0);
+    setRentedGazelles(0);
+    setVisitPeriod('MORNING');
+    setCampType('');
     setDepositAmount('');
     setNotes('');
   }, [isOpen, reservation]);
 
-  const total = useMemo(
-    () => calculateTotal({ rentedTents, rentedCars, rentedBirds, rentedRabbits }, prices),
-    [rentedTents, rentedCars, rentedBirds, rentedRabbits, prices]
-  );
+  const bookedCampTypes = useMemo(() => {
+    if (!startDate || !endDate || !hasCampTypeField(campsite.slug)) return new Set<string>();
+    const taken = new Set<string>();
+    existingReservations.forEach((r) => {
+      if (r.status === 'CANCELLED') return;
+      if (reservation && r.id === reservation.id) return;
+      if (!r.campType) return;
+      if (rangesOverlap(new Date(r.startDate), new Date(r.endDate), startDate, endDate)) {
+        taken.add(r.campType);
+      }
+    });
+    return taken;
+  }, [campsite.slug, existingReservations, startDate, endDate, reservation]);
 
-  // Clean up lock if user closes modal
+  const availableCampTypes = PRIVATE_CAMP_TYPES.filter((item) => !bookedCampTypes.has(item.id));
+
+  useEffect(() => {
+    if (campType && bookedCampTypes.has(campType)) {
+      setCampType('');
+    }
+  }, [bookedCampTypes, campType]);
+
   const handleCancelAndRelease = async () => {
     if (!isEditMode && lockAcquired && currentUser) {
       try {
@@ -141,31 +175,57 @@ export default function BookingModal({
     onClose();
   };
 
-  // Helper to compute daily occupancy (active reservations + other hosts' locks)
-  const getDayAvailability = (day: Date) => {
-    const today = startOfDay(new Date());
-    if (isBefore(day, today)) {
-      return { available: false, count: 0, reason: t('booking.pastDate') };
-    }
-
-    const dayStart = startOfDay(day);
-    const dayEnd = addDays(dayStart, 1);
-
-    // Active reservations overlapping this day (the edited booking never blocks itself)
+  const countForPeriod = (day: Date, period: VisitPeriod) => {
     const resCount = existingReservations.filter((r) => {
       if (r.status === 'CANCELLED') return false;
       if (reservation && r.id === reservation.id) return false;
-      const rStart = new Date(r.startDate);
-      const rEnd = new Date(r.endDate);
-      return rStart < dayEnd && rEnd > dayStart;
+      if (r.visitPeriod !== period) return false;
+      return dateOccupiesDay(new Date(r.startDate), new Date(r.endDate), day);
+    }).length;
+    const lockCount = activeLocks.filter((l) => {
+      if (l.hostAdminId === currentUser?.adminId) return false;
+      if (l.visitPeriod !== period) return false;
+      return dateOccupiesDay(new Date(l.startDate), new Date(l.endDate), day);
+    }).length;
+    return { resCount, lockCount, total: resCount + lockCount };
+  };
+
+  const getDayAvailability = (day: Date) => {
+    const today = startOfDay(new Date());
+    if (isBefore(day, today)) {
+      return { available: false, count: 0, reason: t('booking.pastDate'), label: '' };
+    }
+
+    if (dayUse) {
+      const morningCap = campsite.morningCapacity || campsite.dailyCapacity;
+      const eveningCap = campsite.eveningCapacity || campsite.dailyCapacity;
+      const morning = countForPeriod(day, 'MORNING');
+      const evening = countForPeriod(day, 'EVENING');
+      const morningFull = morning.total >= morningCap;
+      const eveningFull = evening.total >= eveningCap;
+      const label = `${t('period.MORNING').slice(0, 1)} ${morning.total}/${morningCap} · ${t('period.EVENING').slice(0, 1)} ${evening.total}/${eveningCap}`;
+      if (morningFull && eveningFull) {
+        const locked = morning.lockCount + evening.lockCount > 0;
+        return {
+          available: false,
+          count: morning.total + evening.total,
+          reason: locked ? t('booking.heldByOther') : t('booking.capacityFull'),
+          isLockedByOther: locked,
+          label,
+        };
+      }
+      return { available: true, count: morning.total + evening.total, label };
+    }
+
+    const resCount = existingReservations.filter((r) => {
+      if (r.status === 'CANCELLED') return false;
+      if (reservation && r.id === reservation.id) return false;
+      return dateOccupiesDay(new Date(r.startDate), new Date(r.endDate), day);
     }).length;
 
-    // Active locks by OTHER hosts
     const otherLocks = activeLocks.filter((l) => {
       if (l.hostAdminId === currentUser?.adminId) return false;
-      const lStart = new Date(l.startDate);
-      const lEnd = new Date(l.endDate);
-      return lStart < dayEnd && lEnd > dayStart;
+      return dateOccupiesDay(new Date(l.startDate), new Date(l.endDate), day);
     });
 
     const lockCount = otherLocks.length;
@@ -178,6 +238,7 @@ export default function BookingModal({
         count: totalOccupied,
         reason: lockCount > 0 ? t('booking.heldByOther') : t('booking.capacityFull'),
         isLockedByOther: lockCount > 0,
+        label: `${totalOccupied}/${cap}`,
       };
     }
 
@@ -185,45 +246,15 @@ export default function BookingModal({
       available: true,
       count: totalOccupied,
       remaining: cap - totalOccupied,
+      label: `${totalOccupied}/${cap}`,
     };
   };
 
-  // Handle Date Clicks in Calendar
-  const handleDateClick = async (day: Date) => {
-    const avail = getDayAvailability(day);
-    if (!avail.available) return;
-
-    if (!startDate || (startDate && endDate)) {
-      // Starting fresh selection
-      setStartDate(day);
-      setEndDate(null);
-      if (!isEditMode) setLockAcquired(false);
-      setLockError(null);
-      return;
+  const holdDates = async (start: Date, end: Date, period?: VisitPeriod) => {
+    if (isEditMode || !currentUser) {
+      setLockAcquired(true);
+      return true;
     }
-
-    // Selecting end date
-    if (isBefore(day, startDate) || isSameDay(day, startDate)) {
-      setStartDate(day);
-      setEndDate(null);
-      return;
-    }
-
-    // Check if all dates in between are available
-    let curr = new Date(startDate);
-    while (curr < day) {
-      const check = getDayAvailability(curr);
-      if (!check.available) {
-        setLockError(`${format(curr, 'dd MMM', { locale: dateLocale })}: ${check.reason}`);
-        return;
-      }
-      curr = addDays(curr, 1);
-    }
-
-    setEndDate(day);
-
-    // An existing booking already owns its dates, so no temporary hold is needed.
-    if (isEditMode || !currentUser) return;
 
     setIsLocking(true);
     setLockError(null);
@@ -233,24 +264,83 @@ export default function BookingModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           campsiteId: campsite.id,
-          startDate: startDate.toISOString(),
-          endDate: day.toISOString(),
+          startDate: start.toISOString(),
+          endDate: end.toISOString(),
           hostAdminId: currentUser.adminId,
           hostName: currentUser.name,
+          visitPeriod: dayUse && period ? period : null,
         }),
       });
       const data = await res.json();
       if (data.success) {
         setLockAcquired(true);
-      } else {
-        setLockError(translateError(data.error, lang, { date: data.congestedDate || '' }));
-        setLockAcquired(false);
+        return true;
       }
+      setLockError(translateError(data.error, lang, { date: data.congestedDate || '' }));
+      setLockAcquired(false);
+      return false;
     } catch {
       setLockError(t('common.networkError'));
+      return false;
     } finally {
       setIsLocking(false);
     }
+  };
+
+  const rangeAvailable = (from: Date, to: Date) => {
+    let curr = new Date(from);
+    while (curr < to) {
+      const check = getDayAvailability(curr);
+      if (!check.available) {
+        setLockError(`${format(curr, 'dd MMM', { locale: dateLocale })}: ${check.reason}`);
+        return false;
+      }
+      curr = addDays(curr, 1);
+    }
+    return true;
+  };
+
+  const handleDateClick = async (day: Date) => {
+    const avail = getDayAvailability(day);
+    if (!avail.available) return;
+
+    if (dayUse) {
+      const hasSingleDay = Boolean(startDate && endDate && isSameDay(startDate, endDate));
+      const hasRange = Boolean(startDate && endDate && !isSameDay(startDate, endDate));
+
+      if (!startDate || hasRange || (hasSingleDay && (isBefore(day, startDate) || isSameDay(day, startDate)))) {
+        setStartDate(day);
+        setEndDate(day);
+        setLockError(null);
+        await holdDates(day, day);
+        return;
+      }
+
+      if (hasSingleDay && isAfter(day, startDate)) {
+        if (!rangeAvailable(startDate, day)) return;
+        setEndDate(day);
+        await holdDates(startDate, day);
+      }
+      return;
+    }
+
+    if (!startDate || (startDate && endDate)) {
+      setStartDate(day);
+      setEndDate(null);
+      if (!isEditMode) setLockAcquired(false);
+      setLockError(null);
+      return;
+    }
+
+    if (isBefore(day, startDate) || isSameDay(day, startDate)) {
+      setStartDate(day);
+      setEndDate(null);
+      return;
+    }
+
+    if (!rangeAvailable(startDate, day)) return;
+    setEndDate(day);
+    await holdDates(startDate, day);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -262,6 +352,16 @@ export default function BookingModal({
       return;
     }
 
+    if (hasVisitPeriodField(campsite.slug) && !visitPeriod) {
+      setSaveError(t('error.MISSING_PERIOD'));
+      return;
+    }
+
+    if (hasCampTypeField(campsite.slug) && !campType) {
+      setSaveError(t('error.MISSING_CAMP_TYPE'));
+      return;
+    }
+
     setIsSaving(true);
     setSaveError(null);
 
@@ -270,10 +370,15 @@ export default function BookingModal({
       customerPhone: customerPhone.trim(),
       country,
       guestCount: Number(guestCount),
-      rentedTents: Number(rentedTents),
+      rentedTents: hasTentsField(campsite.slug) ? Number(rentedTents) : 0,
       rentedCars: Number(rentedCars),
       rentedBirds: Number(rentedBirds),
+      rentedHoubara: Number(rentedHoubara),
       rentedRabbits: Number(rentedRabbits),
+      rentedSalukis: Number(rentedSalukis),
+      rentedGazelles: Number(rentedGazelles),
+      visitPeriod: hasVisitPeriodField(campsite.slug) ? visitPeriod : null,
+      campType: hasCampTypeField(campsite.slug) ? campType : null,
       notes: notes.trim(),
       depositAmount: depositAmount === '' ? null : Number(depositAmount),
       startDate: startDate.toISOString(),
@@ -319,7 +424,6 @@ export default function BookingModal({
 
   if (!isOpen) return null;
 
-  // Calendar dates computation
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(monthStart);
   const calendarStart = startOfWeek(monthStart);
@@ -348,7 +452,6 @@ export default function BookingModal({
           </button>
         </div>
 
-        {/* STEP 1: CALENDAR VIEW */}
         {step === 1 && (
           <div className="modal-body">
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
@@ -367,6 +470,12 @@ export default function BookingModal({
                 </button>
               </div>
             </div>
+
+            {dayUse && (
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                {t('booking.sameDayHint')}
+              </p>
+            )}
 
             <div className="calendar-grid">
               {weekDays.map((d) => (
@@ -398,9 +507,9 @@ export default function BookingModal({
                     title={avail.available ? undefined : avail.reason}
                   >
                     <span>{format(day, 'd', { locale: dateLocale })}</span>
-                    {avail.available && (
+                    {avail.available && avail.label && (
                       <span className="day-capacity-dot" style={{ color: 'var(--text-muted)' }}>
-                        {avail.count}/{campsite.dailyCapacity}
+                        {avail.label}
                       </span>
                     )}
                     {!avail.available && avail.isLockedByOther && (
@@ -477,7 +586,6 @@ export default function BookingModal({
           </div>
         )}
 
-        {/* STEP 2: BOOKING FIELDS */}
         {step === 2 && (
           <form onSubmit={handleSubmit}>
             <div className="modal-body">
@@ -491,6 +599,13 @@ export default function BookingModal({
                   <span>{t('booking.back')}</span>
                 </button>
               </div>
+
+              {lockError && (
+                <div className="alert alert-error" style={{ marginTop: 0, marginBottom: '1rem' }}>
+                  <AlertCircle size={16} />
+                  <span>{lockError}</span>
+                </div>
+              )}
 
               {saveError && (
                 <div className="alert alert-error" style={{ marginTop: 0, marginBottom: '1rem' }}>
@@ -537,15 +652,53 @@ export default function BookingModal({
                   />
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">{t('field.tents')}</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={rentedTents}
-                    onChange={(e) => setRentedTents(Math.max(0, parseInt(e.target.value) || 0))}
-                  />
-                </div>
+                {hasVisitPeriodField(campsite.slug) && (
+                  <div className="form-group">
+                    <label className="form-label">{t('field.visitPeriod')} *</label>
+                    <select
+                      value={visitPeriod}
+                      onChange={async (e) => {
+                        const next = e.target.value as VisitPeriod;
+                        setVisitPeriod(next);
+                        if (!isEditMode && startDate && endDate) {
+                          await holdDates(startDate, endDate, next);
+                        }
+                      }}
+                    >
+                      <option value="MORNING">{t('period.MORNING')}</option>
+                      <option value="EVENING">{t('period.EVENING')}</option>
+                    </select>
+                  </div>
+                )}
+
+                {hasCampTypeField(campsite.slug) && (
+                  <div className="form-group">
+                    <label className="form-label">{t('field.campType')} *</label>
+                    <select value={campType} onChange={(e) => setCampType(e.target.value)} required>
+                      <option value="">{t('booking.pickCampType')}</option>
+                      {availableCampTypes.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {lang === 'ar' ? item.ar : item.en}
+                        </option>
+                      ))}
+                    </select>
+                    {availableCampTypes.length === 0 && (
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{t('booking.noCampTypes')}</span>
+                    )}
+                  </div>
+                )}
+
+                {hasTentsField(campsite.slug) && (
+                  <div className="form-group">
+                    <label className="form-label">{t('field.tents')}</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={rentedTents}
+                      onChange={(e) => setRentedTents(Math.max(0, parseInt(e.target.value) || 0))}
+                    />
+                  </div>
+                )}
 
                 <div className="form-group">
                   <label className="form-label">{t('field.cars')}</label>
@@ -564,6 +717,36 @@ export default function BookingModal({
                     min="0"
                     value={rentedBirds}
                     onChange={(e) => setRentedBirds(Math.max(0, parseInt(e.target.value) || 0))}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">{t('field.houbara')}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={rentedHoubara}
+                    onChange={(e) => setRentedHoubara(Math.max(0, parseInt(e.target.value) || 0))}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">{t('field.salukis')}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={rentedSalukis}
+                    onChange={(e) => setRentedSalukis(Math.max(0, parseInt(e.target.value) || 0))}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">{t('field.gazelles')}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={rentedGazelles}
+                    onChange={(e) => setRentedGazelles(Math.max(0, parseInt(e.target.value) || 0))}
                   />
                 </div>
 
@@ -591,11 +774,6 @@ export default function BookingModal({
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{t('booking.depositHint')}</span>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">{t('booking.total')}</label>
-                  <div className="total-display">{formatMoney(total, lang)}</div>
-                </div>
-
                 <div className="form-group field-full">
                   <label className="form-label">{t('field.notes')}</label>
                   <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -614,14 +792,18 @@ export default function BookingModal({
           </form>
         )}
 
-        {/* Step 1 Footer */}
         {step === 1 && (
           <div className="modal-footer">
             <button onClick={handleCancelAndRelease} className="btn btn-secondary">
               {isEditMode ? t('booking.close') : t('action.cancel')}
             </button>
             <button
-              onClick={() => setStep(2)}
+              onClick={async () => {
+                if (dayUse && startDate && endDate && !isEditMode) {
+                  await holdDates(startDate, endDate, visitPeriod);
+                }
+                setStep(2);
+              }}
               disabled={!startDate || !endDate || (!isEditMode && !lockAcquired)}
               className="btn btn-primary"
             >

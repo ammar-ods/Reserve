@@ -3,13 +3,9 @@ import { prisma } from '@/lib/prisma';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
 import { buildChanges, logAuditAction } from '@/lib/audit';
 import { formatSettings, getSystemSettings } from '@/lib/settings';
-import { DEFAULT_TABLE_HEADERS } from '@/lib/defaults';
 import { ActionType, Role } from '@prisma/client';
-import { SystemSettingsDTO } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
-
-const PRICE_FIELDS = ['priceTent', 'priceCar', 'priceBird', 'priceRabbit'] as const;
 
 export async function GET() {
   try {
@@ -24,7 +20,7 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { pageTitle, tableHeaders, adminId, userName, requesterRole } = body;
+    const { pageTitle, adminId, userName, requesterRole } = body;
 
     if (requesterRole && requesterRole !== 'ADMIN' && requesterRole !== 'SUPER_ADMIN') {
       return NextResponse.json({ success: false, error: 'FORBIDDEN' }, { status: 403 });
@@ -32,23 +28,10 @@ export async function PUT(request: NextRequest) {
 
     const current = await getSystemSettings();
 
-    const prices: Record<string, number> = {};
-    for (const field of PRICE_FIELDS) {
-      if (body[field] !== undefined) {
-        prices[field] = Math.max(0, Number(body[field]) || 0);
-      }
-    }
-
-    const nextHeaders = tableHeaders
-      ? { ...DEFAULT_TABLE_HEADERS, ...(tableHeaders as Partial<SystemSettingsDTO['tableHeaders']>) }
-      : (current.tableHeaders as SystemSettingsDTO['tableHeaders']);
-
     const updated = await prisma.systemSetting.update({
       where: { id: 'global_config' },
       data: {
         pageTitle: pageTitle || current.pageTitle,
-        tableHeaders: nextHeaders,
-        ...prices,
         updatedBy: adminId || current.updatedBy,
       },
     });
@@ -60,7 +43,7 @@ export async function PUT(request: NextRequest) {
     const changes = buildChanges(
       current as unknown as Record<string, unknown>,
       updated as unknown as Record<string, unknown>,
-      ['pageTitle', 'priceTent', 'priceCar', 'priceBird', 'priceRabbit', 'tableHeaders']
+      ['pageTitle']
     );
 
     if (changes.length > 0) {
@@ -72,7 +55,7 @@ export async function PUT(request: NextRequest) {
         targetType: 'SETTINGS',
         targetId: 'global_config',
         targetLabel: updated.pageTitle,
-        details: 'تعديل إعدادات النظام والأسعار',
+        details: 'تعديل إعدادات النظام',
         changes,
       });
     }

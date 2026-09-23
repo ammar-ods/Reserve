@@ -68,10 +68,6 @@ export default function ConfirmDepositModal({ reservation, onClose, onConfirm }:
                 <strong>{reservation.customerName}</strong>
               </div>
               <div>
-                <span>{t('col.total')}</span>
-                <strong>{formatMoney(reservation.totalAmount, lang)}</strong>
-              </div>
-              <div>
                 <span>{t('confirmModal.agreed')}</span>
                 <strong>
                   {reservation.depositAmount === null ? t('common.none') : formatMoney(reservation.depositAmount, lang)}

@@ -105,7 +105,7 @@ export default function DashboardPage() {
       <main className="main-content">
         <h1 className="page-title">{pageTitle}</h1>
 
-        <StatsBar stats={stats} title={t('stats.global')} />
+        <StatsBar stats={stats} title={t('stats.global')} variant="global" />
 
         <section>
           <h2 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem' }}>
@@ -134,8 +134,8 @@ export default function DashboardPage() {
           campsites={campsites}
           settings={settings}
           onSettingsUpdated={(newSettings) => setSettings(newSettings)}
-          onCampsiteCapacityUpdated={(id, newCap) => {
-            setCampsites((prev) => prev.map((c) => (c.id === id ? { ...c, dailyCapacity: newCap } : c)));
+          onCampsiteCapacityUpdated={(id, update) => {
+            setCampsites((prev) => prev.map((c) => (c.id === id ? { ...c, ...update } : c)));
           }}
         />
       )}

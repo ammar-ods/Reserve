@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { X, Sliders, Check, AlertCircle, UserPlus } from 'lucide-react';
+import { X, Sliders, Check, AlertCircle, UserPlus, Trash2 } from 'lucide-react';
 import { useLang } from './LanguageProvider';
 import { translateError } from '@/lib/i18n';
-import { CampsiteDTO, SystemSettingsDTO, UserAccountDTO, UserSession } from '@/lib/types';
+import { CampsiteDTO, Role, SystemSettingsDTO, UserAccountDTO, UserSession } from '@/lib/types';
+import { isDayUse } from '@/lib/campsites';
 
 interface AdminSettingsModalProps {
   isOpen: boolean;
@@ -13,7 +14,10 @@ interface AdminSettingsModalProps {
   campsites: CampsiteDTO[];
   settings: SystemSettingsDTO;
   onSettingsUpdated: (newSettings: SystemSettingsDTO) => void;
-  onCampsiteCapacityUpdated: (campsiteId: string, newCapacity: number) => void;
+  onCampsiteCapacityUpdated: (
+    campsiteId: string,
+    update: { dailyCapacity?: number; morningCapacity?: number; eveningCapacity?: number }
+  ) => void;
 }
 
 export default function AdminSettingsModal({
@@ -26,26 +30,22 @@ export default function AdminSettingsModal({
   onCampsiteCapacityUpdated,
 }: AdminSettingsModalProps) {
   const { t, lang } = useLang();
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
   const [pageTitle, setPageTitle] = useState(settings.pageTitle);
-  const [headers, setHeaders] = useState(settings.tableHeaders);
-  const [capacities, setCapacities] = useState<Record<string, number>>({});
-  const [prices, setPrices] = useState({
-    priceTent: settings.priceTent,
-    priceCar: settings.priceCar,
-    priceBird: settings.priceBird,
-    priceRabbit: settings.priceRabbit,
-  });
+  const [capacities, setCapacities] = useState<
+    Record<string, { daily: number; morning: number; evening: number }>
+  >({});
   const [isSaving, setIsSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Account creation state
   const [accounts, setAccounts] = useState<UserAccountDTO[]>([]);
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [newRole, setNewRole] = useState<'ADMIN' | 'HOST'>('HOST');
+  const [newRole, setNewRole] = useState<Role>('HOST');
   const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [accountMsg, setAccountMsg] = useState<string | null>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
 
@@ -63,22 +63,20 @@ export default function AdminSettingsModal({
     if (!isOpen) return;
 
     setPageTitle(settings.pageTitle);
-    setHeaders(settings.tableHeaders);
-    setPrices({
-      priceTent: settings.priceTent,
-      priceCar: settings.priceCar,
-      priceBird: settings.priceBird,
-      priceRabbit: settings.priceRabbit,
-    });
-    const capMap: Record<string, number> = {};
+    const capMap: Record<string, { daily: number; morning: number; evening: number }> = {};
     campsites.forEach((c) => {
-      capMap[c.id] = c.dailyCapacity;
+      capMap[c.id] = {
+        daily: c.dailyCapacity,
+        morning: c.morningCapacity || c.dailyCapacity,
+        evening: c.eveningCapacity || c.dailyCapacity,
+      };
     });
     setCapacities(capMap);
     setSuccessMsg(null);
     setErrorMsg(null);
     setAccountMsg(null);
     setAccountError(null);
+    setNewRole('HOST');
     loadAccounts();
   }, [isOpen, settings, campsites, loadAccounts]);
 
@@ -96,8 +94,6 @@ export default function AdminSettingsModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pageTitle,
-          tableHeaders: headers,
-          ...prices,
           adminId: currentUser?.adminId,
           userName: currentUser?.name,
           requesterRole: currentUser?.role,
@@ -110,23 +106,35 @@ export default function AdminSettingsModal({
       onSettingsUpdated(settingsData.settings);
 
       for (const site of campsites) {
-        const newCap = capacities[site.id];
-        if (newCap !== undefined && newCap !== site.dailyCapacity) {
-          const capRes = await fetch('/api/campsites', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              campsiteId: site.id,
-              dailyCapacity: newCap,
-              adminId: currentUser?.adminId,
-              userName: currentUser?.name,
-              requesterRole: currentUser?.role,
-            }),
-          });
-          const capData = await capRes.json();
-          if (capData.success) {
-            onCampsiteCapacityUpdated(site.id, newCap);
-          }
+        const next = capacities[site.id];
+        if (!next) continue;
+        const dayUse = isDayUse(site.slug);
+        const changed = dayUse
+          ? next.morning !== site.morningCapacity || next.evening !== site.eveningCapacity
+          : next.daily !== site.dailyCapacity;
+        if (!changed) continue;
+
+        const capRes = await fetch('/api/campsites', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            campsiteId: site.id,
+            ...(dayUse
+              ? { morningCapacity: next.morning, eveningCapacity: next.evening }
+              : { dailyCapacity: next.daily }),
+            adminId: currentUser?.adminId,
+            userName: currentUser?.name,
+            requesterRole: currentUser?.role,
+          }),
+        });
+        const capData = await capRes.json();
+        if (capData.success) {
+          onCampsiteCapacityUpdated(
+            site.id,
+            dayUse
+              ? { morningCapacity: next.morning, eveningCapacity: next.evening }
+              : { dailyCapacity: next.daily }
+          );
         }
       }
 
@@ -176,25 +184,38 @@ export default function AdminSettingsModal({
     }
   };
 
-  const priceFields: { key: keyof typeof prices; labelKey: string }[] = [
-    { key: 'priceTent', labelKey: 'field.priceTent' },
-    { key: 'priceCar', labelKey: 'field.priceCar' },
-    { key: 'priceBird', labelKey: 'field.priceBird' },
-    { key: 'priceRabbit', labelKey: 'field.priceRabbit' },
-  ];
+  const handleDeleteAccount = async (account: UserAccountDTO) => {
+    if (!isSuperAdmin) return;
+    if (account.adminId === currentUser?.adminId) return;
+    if (!window.confirm(t('account.deleteConfirm', { name: account.username }))) return;
 
-  const headerFields: { key: keyof SystemSettingsDTO['tableHeaders']; labelKey: string }[] = [
-    { key: 'colId', labelKey: 'col.id' },
-    { key: 'colCustomer', labelKey: 'col.customer' },
-    { key: 'colDates', labelKey: 'col.dates' },
-    { key: 'colGuests', labelKey: 'col.guests' },
-    { key: 'colItems', labelKey: 'col.items' },
-    { key: 'colTotal', labelKey: 'col.total' },
-    { key: 'colDeposit', labelKey: 'col.deposit' },
-    { key: 'colStatus', labelKey: 'col.status' },
-    { key: 'colHost', labelKey: 'col.host' },
-    { key: 'colActions', labelKey: 'col.actions' },
-  ];
+    setAccountMsg(null);
+    setAccountError(null);
+    setDeletingId(account.id);
+    try {
+      const res = await fetch('/api/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: account.id,
+          requesterRole: currentUser?.role,
+          requesterAdminId: currentUser?.adminId,
+          requesterName: currentUser?.name,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAccountMsg(t('account.deleted'));
+        loadAccounts();
+      } else {
+        setAccountError(translateError(data.error, lang));
+      }
+    } catch {
+      setAccountError(t('common.networkError'));
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="modal-overlay">
@@ -225,59 +246,94 @@ export default function AdminSettingsModal({
               </div>
             )}
 
-            {/* 1. Daily caps */}
             <section className="settings-section">
               <h4>{t('settings.caps')}</h4>
               <p>{t('settings.capsHint')}</p>
               <div className="settings-grid">
-                {campsites.map((site) => (
-                  <div key={site.id} className="form-group">
-                    <label className="form-label">{site.name}</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="30"
-                      value={capacities[site.id] ?? site.dailyCapacity}
-                      onChange={(e) =>
-                        setCapacities({
-                          ...capacities,
-                          [site.id]: Math.max(1, parseInt(e.target.value) || 1),
-                        })
-                      }
-                    />
-                  </div>
-                ))}
+                {campsites.map((site) =>
+                  isDayUse(site.slug) ? (
+                    <div key={site.id} className="form-group field-full">
+                      <label className="form-label">{site.name}</label>
+                      <div className="settings-grid">
+                        <div className="form-group">
+                          <label className="form-label">{t('field.morningCap')}</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="30"
+                            value={capacities[site.id]?.morning ?? site.morningCapacity}
+                            onChange={(e) =>
+                              setCapacities({
+                                ...capacities,
+                                [site.id]: {
+                                  ...(capacities[site.id] || {
+                                    daily: site.dailyCapacity,
+                                    morning: site.morningCapacity,
+                                    evening: site.eveningCapacity,
+                                  }),
+                                  morning: Math.max(1, parseInt(e.target.value) || 1),
+                                },
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">{t('field.eveningCap')}</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="30"
+                            value={capacities[site.id]?.evening ?? site.eveningCapacity}
+                            onChange={(e) =>
+                              setCapacities({
+                                ...capacities,
+                                [site.id]: {
+                                  ...(capacities[site.id] || {
+                                    daily: site.dailyCapacity,
+                                    morning: site.morningCapacity,
+                                    evening: site.eveningCapacity,
+                                  }),
+                                  evening: Math.max(1, parseInt(e.target.value) || 1),
+                                },
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={site.id} className="form-group">
+                      <label className="form-label">{site.name}</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="30"
+                        value={capacities[site.id]?.daily ?? site.dailyCapacity}
+                        onChange={(e) =>
+                          setCapacities({
+                            ...capacities,
+                            [site.id]: {
+                              ...(capacities[site.id] || {
+                                daily: site.dailyCapacity,
+                                morning: site.morningCapacity,
+                                evening: site.eveningCapacity,
+                              }),
+                              daily: Math.max(1, parseInt(e.target.value) || 1),
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  )
+                )}
               </div>
             </section>
 
-            {/* 2. Unit prices used for the auto-calculated totals */}
-            <section className="settings-section">
-              <h4>{t('settings.prices')}</h4>
-              <p>{t('settings.pricesHint')}</p>
-              <div className="settings-grid">
-                {priceFields.map((field) => (
-                  <div key={field.key} className="form-group">
-                    <label className="form-label">
-                      {t(field.labelKey)} ({t('common.currency')})
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={prices[field.key]}
-                      onChange={(e) =>
-                        setPrices({ ...prices, [field.key]: Math.max(0, Number(e.target.value) || 0) })
-                      }
-                    />
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* 3. Accounts */}
             <section className="settings-section">
               <h4>{t('settings.accounts')}</h4>
-              <p>{t('settings.accountsHint')}</p>
+              <p>
+                {isSuperAdmin ? t('settings.accountsHintSA') : t('settings.accountsHint')}
+              </p>
 
               {accountMsg && (
                 <div className="alert alert-success" style={{ marginTop: 0 }}>
@@ -308,9 +364,10 @@ export default function AdminSettingsModal({
                 </div>
                 <div className="form-group">
                   <label className="form-label">{t('field.role')}</label>
-                  <select value={newRole} onChange={(e) => setNewRole(e.target.value as 'ADMIN' | 'HOST')}>
+                  <select value={newRole} onChange={(e) => setNewRole(e.target.value as Role)}>
                     <option value="HOST">{t('role.HOST')}</option>
                     <option value="ADMIN">{t('role.ADMIN')}</option>
+                    {isSuperAdmin && <option value="SUPER_ADMIN">{t('role.SUPER_ADMIN')}</option>}
                   </select>
                 </div>
                 <div className="form-group" style={{ justifyContent: 'flex-end' }}>
@@ -335,29 +392,28 @@ export default function AdminSettingsModal({
                     <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '0.75rem' }}>
                       {acc.adminId}
                     </span>
+                    {isSuperAdmin && acc.adminId !== currentUser?.adminId && (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        style={{ marginInlineStart: 'auto', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5' }}
+                        onClick={() => handleDeleteAccount(acc)}
+                        disabled={deletingId === acc.id}
+                      >
+                        <Trash2 size={14} />
+                        <span>{t('account.delete')}</span>
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
             </section>
 
-            {/* 4. Titles & column labels */}
             <section className="settings-section">
               <h4>{t('settings.view')}</h4>
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
+              <div className="form-group">
                 <label className="form-label">{t('field.pageTitle')}</label>
                 <input type="text" value={pageTitle} onChange={(e) => setPageTitle(e.target.value)} />
-              </div>
-              <div className="settings-grid">
-                {headerFields.map((field) => (
-                  <div key={field.key} className="form-group">
-                    <label className="form-label">{t(field.labelKey)}</label>
-                    <input
-                      type="text"
-                      value={headers[field.key]}
-                      onChange={(e) => setHeaders({ ...headers, [field.key]: e.target.value })}
-                    />
-                  </div>
-                ))}
               </div>
             </section>
           </div>

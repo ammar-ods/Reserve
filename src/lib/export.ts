@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import { ReservationDTO } from './types';
 import { Lang, translate } from './i18n';
 import { countryName } from './countries';
+import { campTypeLabel } from './campsites';
 
 export function exportReservationsToExcel(
   reservations: ReservationDTO[],
@@ -20,37 +21,45 @@ export function exportReservationsToExcel(
     [t('field.startDate')]: format(new Date(res.startDate), 'yyyy-MM-dd'),
     [t('field.endDate')]: format(new Date(res.endDate), 'yyyy-MM-dd'),
     [t('field.guests')]: res.guestCount,
+    [t('field.campType')]: res.campType ? campTypeLabel(res.campType, lang) : '',
+    [t('field.visitPeriod')]: res.visitPeriod ? t(`period.${res.visitPeriod}`) : '',
     [t('stats.tents')]: res.rentedTents,
     [t('stats.cars')]: res.rentedCars,
     [t('stats.birds')]: res.rentedBirds,
+    [t('stats.houbara')]: res.rentedHoubara,
+    [t('stats.salukis')]: res.rentedSalukis,
+    [t('stats.gazelles')]: res.rentedGazelles,
     [t('stats.rabbits')]: res.rentedRabbits,
-    [t('col.total')]: res.totalAmount,
     [t('col.deposit')]: res.depositAmount ?? 0,
     [t('col.status')]: t(`status.${res.status}`),
-    [t('col.host')]: res.createdByAdminId,
+    [t('col.host')]: res.createdByName || res.createdByAdminId,
     [t('field.notes')]: res.notes || '',
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(rows);
 
   worksheet['!cols'] = [
-    { wch: 16 }, // reservation no.
-    { wch: 20 }, // campsite
-    { wch: 20 }, // guest name
-    { wch: 18 }, // phone
-    { wch: 18 }, // country
-    { wch: 14 }, // start
-    { wch: 14 }, // end
-    { wch: 8 }, // guests
-    { wch: 10 }, // tents
-    { wch: 10 }, // cars
-    { wch: 10 }, // birds
-    { wch: 12 }, // rabbits
-    { wch: 12 }, // total
-    { wch: 12 }, // deposit
-    { wch: 12 }, // status
-    { wch: 12 }, // host
-    { wch: 30 }, // notes
+    { wch: 16 },
+    { wch: 20 },
+    { wch: 20 },
+    { wch: 18 },
+    { wch: 18 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 8 },
+    { wch: 16 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 14 },
+    { wch: 30 },
   ];
 
   const workbook = XLSX.utils.book_new();
