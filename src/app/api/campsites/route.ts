@@ -31,6 +31,8 @@ export async function GET() {
       name: c.name,
       description: c.description,
       dailyCapacity: c.dailyCapacity,
+      morningCapacity: c.morningCapacity,
+      eveningCapacity: c.eveningCapacity,
       iconName: c.iconName,
       activeReservationsCount: c._count.reservations,
       activeLocksCount: c._count.locks,
@@ -46,13 +48,21 @@ export async function GET() {
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
-    const { campsiteId, dailyCapacity, adminId, userName, requesterRole } = body;
+    const { campsiteId, dailyCapacity, morningCapacity, eveningCapacity, adminId, userName, requesterRole } = body;
 
     if (requesterRole && requesterRole !== 'ADMIN' && requesterRole !== 'SUPER_ADMIN') {
       return NextResponse.json({ success: false, error: 'FORBIDDEN' }, { status: 403 });
     }
 
-    if (!campsiteId || typeof dailyCapacity !== 'number' || dailyCapacity < 1) {
+    if (!campsiteId) {
+      return NextResponse.json({ success: false, error: 'MISSING_FIELDS' }, { status: 400 });
+    }
+
+    const data: { dailyCapacity?: number; morningCapacity?: number; eveningCapacity?: number } = {};
+    if (typeof dailyCapacity === 'number' && dailyCapacity >= 1) data.dailyCapacity = dailyCapacity;
+    if (typeof morningCapacity === 'number' && morningCapacity >= 1) data.morningCapacity = morningCapacity;
+    if (typeof eveningCapacity === 'number' && eveningCapacity >= 1) data.eveningCapacity = eveningCapacity;
+    if (Object.keys(data).length === 0) {
       return NextResponse.json({ success: false, error: 'MISSING_FIELDS' }, { status: 400 });
     }
 
@@ -66,13 +76,12 @@ export async function PATCH(request: NextRequest) {
 
     const updated = await prisma.campsite.update({
       where: { id: campsiteId },
-      data: { dailyCapacity },
+      data,
     });
 
-    // Broadcast capacity change
     broadcastRealtimeEvent({
       type: 'CAPACITY_UPDATED',
-      payload: { campsiteId, newCapacity: dailyCapacity },
+      payload: { campsiteId, newCapacity: updated.dailyCapacity },
     });
 
     // Audit log
@@ -89,7 +98,7 @@ export async function PATCH(request: NextRequest) {
       changes: buildChanges(
         current as unknown as Record<string, unknown>,
         updated as unknown as Record<string, unknown>,
-        ['dailyCapacity']
+        ['dailyCapacity', 'morningCapacity', 'eveningCapacity']
       ),
     });
 

@@ -5,6 +5,7 @@ import { ArrowLeft, Lock } from 'lucide-react';
 import CampsiteIcon from './CampsiteIcon';
 import { useLang } from './LanguageProvider';
 import { CampsiteDTO } from '@/lib/types';
+import { isDayUse } from '@/lib/campsites';
 
 interface CampsiteCardProps {
   campsite: CampsiteDTO;
@@ -33,7 +34,9 @@ export default function CampsiteCard({ campsite, showCapacity = false }: Campsit
             )}
             {showCapacity && (
               <span className="campsite-capacity-badge">
-                {t('card.cap')}: {campsite.dailyCapacity}
+                {isDayUse(campsite.slug)
+                  ? `${t('period.MORNING')} ${campsite.morningCapacity} · ${t('period.EVENING')} ${campsite.eveningCapacity}`
+                  : `${t('card.cap')}: ${campsite.dailyCapacity}`}
               </span>
             )}
           </div>

@@ -207,7 +207,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const check = await checkCapacityAvailability(campsiteId, start, end, createdByAdminId);
+    const check = await checkCapacityAvailability(
+      campsiteId,
+      start,
+      end,
+      createdByAdminId,
+      undefined,
+      hasVisitPeriodField(campsite.slug) ? visitPeriod : null
+    );
     if (!check.available) {
       return NextResponse.json(
         { success: false, error: 'CAPACITY_REACHED', congestedDate: check.congestedDate },

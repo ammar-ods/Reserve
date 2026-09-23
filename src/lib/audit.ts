@@ -78,6 +78,8 @@ const FIELD_LABELS: Record<string, string> = {
   startDate: 'field.startDate',
   endDate: 'field.endDate',
   dailyCapacity: 'field.dailyCapacity',
+  morningCapacity: 'field.morningCap',
+  eveningCapacity: 'field.eveningCap',
   pageTitle: 'field.pageTitle',
   role: 'field.role',
   username: 'field.username',

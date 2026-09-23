@@ -121,13 +121,21 @@ export async function PATCH(
       const datesChanged =
         nextStart.getTime() !== current.startDate.getTime() || nextEnd.getTime() !== current.endDate.getTime();
 
-      if (datesChanged) {
+      const nextPeriod = hasVisitPeriodField(slug)
+        ? body.visitPeriod === 'MORNING' || body.visitPeriod === 'EVENING'
+          ? body.visitPeriod
+          : current.visitPeriod
+        : null;
+      const periodChanged = hasVisitPeriodField(slug) && nextPeriod !== current.visitPeriod;
+
+      if (datesChanged || periodChanged) {
         const check = await checkCapacityAvailability(
           current.campsiteId,
           nextStart,
           nextEnd,
           adminId || current.createdByAdminId,
-          current.id
+          current.id,
+          nextPeriod
         );
         if (!check.available) {
           return NextResponse.json(

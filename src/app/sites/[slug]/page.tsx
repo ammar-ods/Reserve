@@ -308,11 +308,11 @@ export default function SiteDetailsPage({
           campsites={allCampsites}
           settings={settings}
           onSettingsUpdated={(newSettings) => setSettings(newSettings)}
-          onCampsiteCapacityUpdated={(id, newCap) => {
+          onCampsiteCapacityUpdated={(id, update) => {
             if (campsite.id === id) {
-              setCampsite({ ...campsite, dailyCapacity: newCap });
+              setCampsite({ ...campsite, ...update });
             }
-            setAllCampsites((prev) => prev.map((c) => (c.id === id ? { ...c, dailyCapacity: newCap } : c)));
+            setAllCampsites((prev) => prev.map((c) => (c.id === id ? { ...c, ...update } : c)));
           }}
         />
       )}

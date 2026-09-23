@@ -38,6 +38,8 @@ export interface CampsiteDTO {
   name: string;
   description: string | null;
   dailyCapacity: number;
+  morningCapacity: number;
+  eveningCapacity: number;
   iconName: string;
   activeReservationsCount?: number;
   activeLocksCount?: number;
@@ -82,6 +84,7 @@ export interface ActiveLockDTO {
   campsiteId: string;
   hostAdminId: string;
   hostName: string;
+  visitPeriod: VisitPeriod | null;
   startDate: string; // ISO string
   endDate: string; // ISO string
   expiresAt: string; // ISO string

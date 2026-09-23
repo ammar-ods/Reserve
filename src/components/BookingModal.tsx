@@ -175,10 +175,46 @@ export default function BookingModal({
     onClose();
   };
 
+  const countForPeriod = (day: Date, period: VisitPeriod) => {
+    const resCount = existingReservations.filter((r) => {
+      if (r.status === 'CANCELLED') return false;
+      if (reservation && r.id === reservation.id) return false;
+      if (r.visitPeriod !== period) return false;
+      return dateOccupiesDay(new Date(r.startDate), new Date(r.endDate), day);
+    }).length;
+    const lockCount = activeLocks.filter((l) => {
+      if (l.hostAdminId === currentUser?.adminId) return false;
+      if (l.visitPeriod !== period) return false;
+      return dateOccupiesDay(new Date(l.startDate), new Date(l.endDate), day);
+    }).length;
+    return { resCount, lockCount, total: resCount + lockCount };
+  };
+
   const getDayAvailability = (day: Date) => {
     const today = startOfDay(new Date());
     if (isBefore(day, today)) {
-      return { available: false, count: 0, reason: t('booking.pastDate') };
+      return { available: false, count: 0, reason: t('booking.pastDate'), label: '' };
+    }
+
+    if (dayUse) {
+      const morningCap = campsite.morningCapacity || campsite.dailyCapacity;
+      const eveningCap = campsite.eveningCapacity || campsite.dailyCapacity;
+      const morning = countForPeriod(day, 'MORNING');
+      const evening = countForPeriod(day, 'EVENING');
+      const morningFull = morning.total >= morningCap;
+      const eveningFull = evening.total >= eveningCap;
+      const label = `${t('period.MORNING').slice(0, 1)} ${morning.total}/${morningCap} · ${t('period.EVENING').slice(0, 1)} ${evening.total}/${eveningCap}`;
+      if (morningFull && eveningFull) {
+        const locked = morning.lockCount + evening.lockCount > 0;
+        return {
+          available: false,
+          count: morning.total + evening.total,
+          reason: locked ? t('booking.heldByOther') : t('booking.capacityFull'),
+          isLockedByOther: locked,
+          label,
+        };
+      }
+      return { available: true, count: morning.total + evening.total, label };
     }
 
     const resCount = existingReservations.filter((r) => {
@@ -202,6 +238,7 @@ export default function BookingModal({
         count: totalOccupied,
         reason: lockCount > 0 ? t('booking.heldByOther') : t('booking.capacityFull'),
         isLockedByOther: lockCount > 0,
+        label: `${totalOccupied}/${cap}`,
       };
     }
 
@@ -209,13 +246,14 @@ export default function BookingModal({
       available: true,
       count: totalOccupied,
       remaining: cap - totalOccupied,
+      label: `${totalOccupied}/${cap}`,
     };
   };
 
-  const holdDates = async (start: Date, end: Date) => {
+  const holdDates = async (start: Date, end: Date, period?: VisitPeriod) => {
     if (isEditMode || !currentUser) {
       setLockAcquired(true);
-      return;
+      return true;
     }
 
     setIsLocking(true);
@@ -230,17 +268,20 @@ export default function BookingModal({
           endDate: end.toISOString(),
           hostAdminId: currentUser.adminId,
           hostName: currentUser.name,
+          visitPeriod: dayUse && period ? period : null,
         }),
       });
       const data = await res.json();
       if (data.success) {
         setLockAcquired(true);
-      } else {
-        setLockError(translateError(data.error, lang, { date: data.congestedDate || '' }));
-        setLockAcquired(false);
+        return true;
       }
+      setLockError(translateError(data.error, lang, { date: data.congestedDate || '' }));
+      setLockAcquired(false);
+      return false;
     } catch {
       setLockError(t('common.networkError'));
+      return false;
     } finally {
       setIsLocking(false);
     }
@@ -466,9 +507,9 @@ export default function BookingModal({
                     title={avail.available ? undefined : avail.reason}
                   >
                     <span>{format(day, 'd', { locale: dateLocale })}</span>
-                    {avail.available && (
+                    {avail.available && avail.label && (
                       <span className="day-capacity-dot" style={{ color: 'var(--text-muted)' }}>
-                        {avail.count}/{campsite.dailyCapacity}
+                        {avail.label}
                       </span>
                     )}
                     {!avail.available && avail.isLockedByOther && (
@@ -559,6 +600,13 @@ export default function BookingModal({
                 </button>
               </div>
 
+              {lockError && (
+                <div className="alert alert-error" style={{ marginTop: 0, marginBottom: '1rem' }}>
+                  <AlertCircle size={16} />
+                  <span>{lockError}</span>
+                </div>
+              )}
+
               {saveError && (
                 <div className="alert alert-error" style={{ marginTop: 0, marginBottom: '1rem' }}>
                   <AlertCircle size={16} />
@@ -607,7 +655,16 @@ export default function BookingModal({
                 {hasVisitPeriodField(campsite.slug) && (
                   <div className="form-group">
                     <label className="form-label">{t('field.visitPeriod')} *</label>
-                    <select value={visitPeriod} onChange={(e) => setVisitPeriod(e.target.value as VisitPeriod)}>
+                    <select
+                      value={visitPeriod}
+                      onChange={async (e) => {
+                        const next = e.target.value as VisitPeriod;
+                        setVisitPeriod(next);
+                        if (!isEditMode && startDate && endDate) {
+                          await holdDates(startDate, endDate, next);
+                        }
+                      }}
+                    >
                       <option value="MORNING">{t('period.MORNING')}</option>
                       <option value="EVENING">{t('period.EVENING')}</option>
                     </select>
@@ -741,7 +798,12 @@ export default function BookingModal({
               {isEditMode ? t('booking.close') : t('action.cancel')}
             </button>
             <button
-              onClick={() => setStep(2)}
+              onClick={async () => {
+                if (dayUse && startDate && endDate && !isEditMode) {
+                  await holdDates(startDate, endDate, visitPeriod);
+                }
+                setStep(2);
+              }}
               disabled={!startDate || !endDate || (!isEditMode && !lockAcquired)}
               className="btn btn-primary"
             >

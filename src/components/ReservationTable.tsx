@@ -8,7 +8,7 @@ import { ReservationDTO, SystemSettingsDTO, UserSession } from '@/lib/types';
 import { exportReservationsToExcel } from '@/lib/export';
 import { formatMoney } from '@/lib/i18n';
 import { countryFlag, countryName } from '@/lib/countries';
-import { campTypeLabel, hasTentsField } from '@/lib/campsites';
+import { campTypeLabel, hasTentsField, hasVisitPeriodField } from '@/lib/campsites';
 
 interface ReservationTableProps {
   reservations: ReservationDTO[];
@@ -31,6 +31,7 @@ export default function ReservationTable({
   onEdit,
 }: ReservationTableProps) {
   const { t, lang, dateLocale } = useLang();
+  const showPeriod = hasVisitPeriodField(campsiteSlug);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'CONFIRMED' | 'PENDING' | 'CANCELLED'>('ALL');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -74,7 +75,7 @@ export default function ReservationTable({
         color: '#155e75',
       });
     }
-    if (res.visitPeriod) {
+    if (res.visitPeriod && !showPeriod) {
       chips.push({
         key: 'period',
         label: t(`period.${res.visitPeriod}`),
@@ -157,6 +158,7 @@ export default function ReservationTable({
               <th>{col('colCustomer', 'col.customer')}</th>
               <th>{col('colCheckIn', 'col.checkIn')}</th>
               <th>{col('colCheckOut', 'col.checkOut')}</th>
+              {showPeriod && <th>{t('col.period')}</th>}
               <th>{col('colGuests', 'col.guests')}</th>
               <th>{col('colItems', 'col.items')}</th>
               <th>{col('colDeposit', 'col.deposit')}</th>
@@ -168,7 +170,7 @@ export default function ReservationTable({
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={10} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                <td colSpan={showPeriod ? 11 : 10} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
                   {t('table.empty')}
                 </td>
               </tr>
@@ -205,6 +207,11 @@ export default function ReservationTable({
                     <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
                       {format(new Date(res.endDate), 'dd MMM yyyy', { locale: dateLocale })}
                     </td>
+                    {showPeriod && (
+                      <td style={{ fontWeight: 600 }}>
+                        {res.visitPeriod ? t(`period.${res.visitPeriod}`) : t('common.none')}
+                      </td>
+                    )}
 
                     <td style={{ fontWeight: 600 }}>{res.guestCount}</td>
 

@@ -1,8 +1,8 @@
 import { EventEmitter } from 'events';
 import { prisma } from './prisma';
 import { dateOccupiesDay, occupancyRange, rangesOverlap } from './dates';
-import { isPrivateCampTypeId, PRIVATE_CAMP_SLUG } from './campsites';
-import { RealtimeEvent, ActiveLockDTO } from './types';
+import { isDayUse, isPrivateCampTypeId, PRIVATE_CAMP_SLUG } from './campsites';
+import { RealtimeEvent, ActiveLockDTO, VisitPeriod } from './types';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -19,16 +19,35 @@ export function broadcastRealtimeEvent(event: RealtimeEvent) {
   realtimeEmitter.emit('message', event);
 }
 
+function occupiedOnDay(
+  items: { startDate: Date; endDate: Date; visitPeriod?: VisitPeriod | null }[],
+  day: Date,
+  period?: VisitPeriod | null
+) {
+  return items.filter((item) => {
+    if (!dateOccupiesDay(item.startDate, item.endDate, day)) return false;
+    if (period && item.visitPeriod !== period) return false;
+    return true;
+  }).length;
+}
+
 export async function checkCapacityAvailability(
   campsiteId: string,
   startDate: Date,
   endDate: Date,
   excludeHostAdminId?: string,
-  excludeReservationId?: string
+  excludeReservationId?: string,
+  visitPeriod?: VisitPeriod | null
 ): Promise<{ available: boolean; reason?: string; congestedDate?: string }> {
   const campsite = await prisma.campsite.findUnique({
     where: { id: campsiteId },
-    select: { dailyCapacity: true, name: true },
+    select: {
+      dailyCapacity: true,
+      morningCapacity: true,
+      eveningCapacity: true,
+      slug: true,
+      name: true,
+    },
   });
 
   if (!campsite) {
@@ -54,6 +73,7 @@ export async function checkCapacityAvailability(
       startDate: true,
       endDate: true,
       customerName: true,
+      visitPeriod: true,
     },
   });
 
@@ -69,23 +89,44 @@ export async function checkCapacityAvailability(
       endDate: true,
       hostAdminId: true,
       hostName: true,
+      visitPeriod: true,
     },
   });
+
+  const dayUse = isDayUse(campsite.slug);
+  const periods: VisitPeriod[] = visitPeriod ? [visitPeriod] : dayUse ? ['MORNING', 'EVENING'] : [];
 
   const range = occupancyRange(startDate, endDate);
   const current = new Date(range.start);
   while (current < range.end) {
-    const resCount = activeReservations.filter((r) => dateOccupiesDay(r.startDate, r.endDate, current)).length;
-    const lockCount = activeLocks.filter((l) => dateOccupiesDay(l.startDate, l.endDate, current)).length;
-    const totalOccupied = resCount + lockCount;
-
-    if (totalOccupied >= campsite.dailyCapacity) {
-      const dateStr = current.toISOString().split('T')[0];
-      return {
-        available: false,
-        reason: `Daily capacity limit (${campsite.dailyCapacity}) reached for ${dateStr}. (Active: ${resCount}, In-progress holds: ${lockCount})`,
-        congestedDate: dateStr,
-      };
+    if (dayUse) {
+      const blocked = periods.filter((period) => {
+        const cap = period === 'MORNING' ? campsite.morningCapacity : campsite.eveningCapacity;
+        const resCount = occupiedOnDay(activeReservations, current, period);
+        const lockCount = occupiedOnDay(activeLocks, current, period);
+        return resCount + lockCount >= cap;
+      });
+      // A specific period must be free. With no period yet, the day stays open while either period has room.
+      const allRequestedPeriodsFull = visitPeriod ? blocked.length > 0 : blocked.length === periods.length;
+      if (allRequestedPeriodsFull) {
+        const dateStr = current.toISOString().split('T')[0];
+        return {
+          available: false,
+          reason: 'CAPACITY_REACHED',
+          congestedDate: dateStr,
+        };
+      }
+    } else {
+      const resCount = occupiedOnDay(activeReservations, current);
+      const lockCount = occupiedOnDay(activeLocks, current);
+      if (resCount + lockCount >= campsite.dailyCapacity) {
+        const dateStr = current.toISOString().split('T')[0];
+        return {
+          available: false,
+          reason: `Daily capacity limit (${campsite.dailyCapacity}) reached for ${dateStr}. (Active: ${resCount}, In-progress holds: ${lockCount})`,
+          congestedDate: dateStr,
+        };
+      }
     }
 
     current.setDate(current.getDate() + 1);
@@ -159,12 +200,13 @@ export async function acquireLock(params: {
   endDate: Date;
   hostAdminId: string;
   hostName: string;
-}): Promise<{ success: boolean; lock?: ActiveLockDTO; error?: string }> {
-  const { campsiteId, startDate, endDate, hostAdminId, hostName } = params;
+  visitPeriod?: VisitPeriod | null;
+}): Promise<{ success: boolean; lock?: ActiveLockDTO; error?: string; congestedDate?: string }> {
+  const { campsiteId, startDate, endDate, hostAdminId, hostName, visitPeriod } = params;
 
-  const check = await checkCapacityAvailability(campsiteId, startDate, endDate, hostAdminId);
+  const check = await checkCapacityAvailability(campsiteId, startDate, endDate, hostAdminId, undefined, visitPeriod);
   if (!check.available) {
-    return { success: false, error: check.reason };
+    return { success: false, error: check.reason, congestedDate: check.congestedDate };
   }
 
   await prisma.activeLock.deleteMany({
@@ -182,6 +224,7 @@ export async function acquireLock(params: {
       endDate,
       hostAdminId,
       hostName,
+      visitPeriod: visitPeriod || null,
       expiresAt,
     },
   });
@@ -191,6 +234,7 @@ export async function acquireLock(params: {
     campsiteId: created.campsiteId,
     hostAdminId: created.hostAdminId,
     hostName: created.hostName,
+    visitPeriod: created.visitPeriod,
     startDate: created.startDate.toISOString(),
     endDate: created.endDate.toISOString(),
     expiresAt: created.expiresAt.toISOString(),

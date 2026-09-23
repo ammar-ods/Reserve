@@ -55,6 +55,8 @@ model Campsite {
   name            String
   description     String?
   dailyCapacity   Int           @default(3) // Hard limit on active reservations sharing any single day
+  morningCapacity Int           @default(3) // Day-use only: cap for the morning period
+  eveningCapacity Int           @default(3) // Day-use only: cap for the evening period
   iconName        String        @default("Tent")
   sortOrder       Int           @default(0) // Display order of the campsites everywhere in the UI
   reservations    Reservation[]
@@ -108,6 +110,7 @@ model ActiveLock {
   campsite    Campsite @relation(fields: [campsiteId], references: [id], onDelete: Cascade)
   hostAdminId String  // e.g. "HOST-01"
   hostName    String
+  visitPeriod VisitPeriod? // Day-use holds occupy one period, not the whole day
   startDate   DateTime
   endDate     DateTime
   expiresAt   DateTime // TTL for temporary lock
@@ -119,7 +122,7 @@ model ActiveLock {
 model AuditLog {
   id           String     @id @default(uuid())
   action       ActionType
-  adminId      String     // Host Admin ID
+  adminId      String?    // Host Admin ID; cleared when that account is deleted
   userRole     Role
   userName     String
   targetType   String     // "RESERVATION", "CAMPSITE", "LOCK", "SETTINGS", "USER"
@@ -130,7 +133,7 @@ model AuditLog {
   changes      Json?      // [{ field, labelKey, before, after }] shown in the Super Admin detail popup
   timestamp    DateTime   @default(now())
 
-  user         User?      @relation(fields: [adminId], references: [adminId])
+  user         User?      @relation(fields: [adminId], references: [adminId], onDelete: SetNull)
 
   @@index([timestamp(sort: Desc)])
 }

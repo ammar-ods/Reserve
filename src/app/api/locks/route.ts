@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { campsiteId, startDate, endDate, hostAdminId, hostName } = body;
+    const { campsiteId, startDate, endDate, hostAdminId, hostName, visitPeriod } = body;
 
     if (!campsiteId || !startDate || !endDate || !hostAdminId) {
       return NextResponse.json(
@@ -54,10 +54,14 @@ export async function POST(request: NextRequest) {
       endDate: end,
       hostAdminId,
       hostName: hostName || hostAdminId,
+      visitPeriod: visitPeriod === 'MORNING' || visitPeriod === 'EVENING' ? visitPeriod : null,
     });
 
     if (!result.success) {
-      return NextResponse.json({ success: false, error: result.error }, { status: 409 });
+      return NextResponse.json(
+        { success: false, error: result.error || 'CAPACITY_REACHED', congestedDate: result.congestedDate },
+        { status: 409 }
+      );
     }
 
     return NextResponse.json({ success: true, lock: result.lock });

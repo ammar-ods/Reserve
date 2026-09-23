@@ -151,6 +151,12 @@ export async function DELETE(request: NextRequest) {
       }
     }
 
+    // Audit rows keep their text, but the account link is cleared so the delete can proceed.
+    await prisma.auditLog.updateMany({
+      where: { adminId: target.adminId },
+      data: { adminId: null },
+    });
+
     await prisma.user.delete({ where: { id: target.id } });
 
     await logAuditAction({

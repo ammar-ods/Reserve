@@ -134,8 +134,8 @@ export default function DashboardPage() {
           campsites={campsites}
           settings={settings}
           onSettingsUpdated={(newSettings) => setSettings(newSettings)}
-          onCampsiteCapacityUpdated={(id, newCap) => {
-            setCampsites((prev) => prev.map((c) => (c.id === id ? { ...c, dailyCapacity: newCap } : c)));
+          onCampsiteCapacityUpdated={(id, update) => {
+            setCampsites((prev) => prev.map((c) => (c.id === id ? { ...c, ...update } : c)));
           }}
         />
       )}

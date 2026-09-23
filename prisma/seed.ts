@@ -17,7 +17,7 @@ const SUPER_ADMIN = {
 };
 
 const CAMPSITES = [
-  { slug: 'day-use', name: 'حجز بدون مبيت', dailyCapacity: 3, iconName: 'Sun', sortOrder: 1 },
+  { slug: 'day-use', name: 'حجز بدون مبيت', dailyCapacity: 3, morningCapacity: 3, eveningCapacity: 3, iconName: 'Sun', sortOrder: 1 },
   { slug: 'elite-camp', name: 'مخيم النخبة (عادي)', dailyCapacity: 2, iconName: 'Crown', sortOrder: 2 },
   { slug: 'private-camp', name: 'المخيم الخاص', dailyCapacity: 5, iconName: 'Home', sortOrder: 3 },
 ];
@@ -76,7 +76,13 @@ async function main() {
   for (const site of CAMPSITES) {
     await prisma.campsite.upsert({
       where: { slug: site.slug },
-      update: { name: site.name, iconName: site.iconName, sortOrder: site.sortOrder, dailyCapacity: site.dailyCapacity },
+      update: {
+        name: site.name,
+        iconName: site.iconName,
+        sortOrder: site.sortOrder,
+        dailyCapacity: site.dailyCapacity,
+        ...('morningCapacity' in site ? { morningCapacity: site.morningCapacity, eveningCapacity: site.eveningCapacity } : {}),
+      },
       create: site,
     });
   }
