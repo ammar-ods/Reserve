@@ -604,6 +604,16 @@ input:focus, select:focus, textarea:focus {
   border-inline-start: 4px solid transparent;
 }
 
+/* Finished visits stay visible and editable, but read as inactive. */
+.reserve-table tr.row-past {
+  background-color: #e5e7eb !important;
+  border-inline-start: 4px solid #94a3b8;
+}
+
+.reserve-table tr.row-past td {
+  color: #6b7280;
+}
+
 .clickable-row {
   cursor: pointer;
 }

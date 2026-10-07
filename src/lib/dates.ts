@@ -32,6 +32,17 @@ export function dateOccupiesDay(startDate: Date, endDate: Date, day: Date): bool
   return current >= start && current < end;
 }
 
+/** A visit is over once its check-out day is before today. Same-day visits end after that day. */
+export function isVisitPast(startDate: Date, endDate: Date, now = new Date()): boolean {
+  const today = atStartOfDay(now);
+  const checkIn = atStartOfDay(startDate);
+  const checkOut = atStartOfDay(endDate);
+  if (checkOut.getTime() <= checkIn.getTime()) {
+    return checkIn.getTime() < today.getTime();
+  }
+  return checkOut.getTime() < today.getTime();
+}
+
 export function isSameCalendarDay(a: Date, b: Date): boolean {
   return atStartOfDay(a).getTime() === atStartOfDay(b).getTime();
 }

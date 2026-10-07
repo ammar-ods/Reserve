@@ -11,7 +11,7 @@ import { buildCreationSnapshot, logAuditAction } from '@/lib/audit';
 import { ActionType, ReservationStatus, VisitPeriod } from '@prisma/client';
 import { CountryCount } from '@/lib/types';
 import { hasCampTypeField, hasTentsField, hasVisitPeriodField, isDayUse, isPrivateCampTypeId } from '@/lib/campsites';
-import { isValidBookingRange } from '@/lib/dates';
+import { isValidBookingRange, isVisitPast } from '@/lib/dates';
 
 export const dynamic = 'force-dynamic';
 
@@ -120,16 +120,24 @@ export async function GET(request: NextRequest) {
       .map(([code, value]) => ({ code, bookings: value.bookings, guests: value.guests }))
       .sort((a, b) => b.bookings - a.bookings || a.code.localeCompare(b.code));
 
+    // Rentals are still to be issued, so only upcoming confirmed visits count.
+    // Houbara, rabbits, and gazelles are consumed, so past and future confirmed visits both count.
+    const confirmedVisits = allReserved.filter((r) => r.status === 'CONFIRMED');
+    const rentalSource = campsiteId
+      ? confirmedVisits.filter((r) => !isVisitPast(r.startDate, r.endDate))
+      : allReserved;
+    const consumableSource = campsiteId ? confirmedVisits : allReserved;
+
     const stats = {
       totalActiveReservations: allReserved.length,
       totalGuests: allReserved.reduce((acc, r) => acc + (r.guestCount || 0), 0),
-      rentedCars: allReserved.reduce((acc, r) => acc + (r.rentedCars || 0), 0),
-      rentedTents: allReserved.reduce((acc, r) => acc + (r.rentedTents || 0), 0),
-      rentedBirds: allReserved.reduce((acc, r) => acc + (r.rentedBirds || 0), 0),
-      rentedHoubara: allReserved.reduce((acc, r) => acc + (r.rentedHoubara || 0), 0),
-      rentedRabbits: allReserved.reduce((acc, r) => acc + (r.rentedRabbits || 0), 0),
-      rentedSalukis: allReserved.reduce((acc, r) => acc + (r.rentedSalukis || 0), 0),
-      rentedGazelles: allReserved.reduce((acc, r) => acc + (r.rentedGazelles || 0), 0),
+      rentedCars: rentalSource.reduce((acc, r) => acc + (r.rentedCars || 0), 0),
+      rentedTents: rentalSource.reduce((acc, r) => acc + (r.rentedTents || 0), 0),
+      rentedBirds: rentalSource.reduce((acc, r) => acc + (r.rentedBirds || 0), 0),
+      rentedSalukis: rentalSource.reduce((acc, r) => acc + (r.rentedSalukis || 0), 0),
+      rentedHoubara: consumableSource.reduce((acc, r) => acc + (r.rentedHoubara || 0), 0),
+      rentedRabbits: consumableSource.reduce((acc, r) => acc + (r.rentedRabbits || 0), 0),
+      rentedGazelles: consumableSource.reduce((acc, r) => acc + (r.rentedGazelles || 0), 0),
       pendingCount: allReserved.filter((r) => r.status === 'PENDING').length,
       confirmedCount: allReserved.filter((r) => r.status === 'CONFIRMED').length,
       cancelledCount,
