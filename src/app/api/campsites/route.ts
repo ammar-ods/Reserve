@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
 import { buildChanges, logAuditAction } from '@/lib/audit';
+import { isVisitPast } from '@/lib/dates';
 import { ActionType, Role } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
@@ -9,21 +10,30 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const now = new Date();
-    const campsites = await prisma.campsite.findMany({
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-      include: {
-        _count: {
-          select: {
-            reservations: {
-              where: { status: { in: ['PENDING', 'CONFIRMED'] } },
-            },
-            locks: {
-              where: { expiresAt: { gt: now } },
+    const [campsites, openReservations] = await Promise.all([
+      prisma.campsite.findMany({
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        include: {
+          _count: {
+            select: {
+              locks: {
+                where: { expiresAt: { gt: now } },
+              },
             },
           },
         },
-      },
-    });
+      }),
+      prisma.reservation.findMany({
+        where: { status: { in: ['PENDING', 'CONFIRMED'] } },
+        select: { campsiteId: true, startDate: true, endDate: true },
+      }),
+    ]);
+
+    const activeBySite = new Map<string, number>();
+    for (const reservation of openReservations) {
+      if (isVisitPast(reservation.startDate, reservation.endDate, now)) continue;
+      activeBySite.set(reservation.campsiteId, (activeBySite.get(reservation.campsiteId) || 0) + 1);
+    }
 
     const formatted = campsites.map((c) => ({
       id: c.id,
@@ -34,7 +44,7 @@ export async function GET() {
       morningCapacity: c.morningCapacity,
       eveningCapacity: c.eveningCapacity,
       iconName: c.iconName,
-      activeReservationsCount: c._count.reservations,
+      activeReservationsCount: activeBySite.get(c.id) || 0,
       activeLocksCount: c._count.locks,
     }));
 
