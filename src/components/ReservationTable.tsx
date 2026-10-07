@@ -9,6 +9,7 @@ import { exportReservationsToExcel } from '@/lib/export';
 import { formatMoney } from '@/lib/i18n';
 import { countryFlag, countryName } from '@/lib/countries';
 import { campTypeLabel, hasTentsField, hasVisitPeriodField } from '@/lib/campsites';
+import { isVisitPast } from '@/lib/dates';
 
 interface ReservationTableProps {
   reservations: ReservationDTO[];
@@ -177,9 +178,14 @@ export default function ReservationTable({
             ) : (
               filtered.map((res) => {
                 const isUpdating = updatingId === res.id;
+                const isPast = isVisitPast(new Date(res.startDate), new Date(res.endDate));
 
                 return (
-                  <tr key={res.id} className={`row-${res.status}`} style={{ opacity: isUpdating ? 0.6 : 1 }}>
+                  <tr
+                    key={res.id}
+                    className={`row-${res.status}${isPast ? ' row-past' : ''}`}
+                    style={{ opacity: isUpdating ? 0.6 : 1 }}
+                  >
                     <td style={{ fontWeight: 700, fontFamily: 'monospace', color: 'var(--primary)' }}>
                       {res.reservationNumber}
                     </td>
