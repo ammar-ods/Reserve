@@ -120,10 +120,13 @@ export async function GET(request: NextRequest) {
       .map(([code, value]) => ({ code, bookings: value.bookings, guests: value.guests }))
       .sort((a, b) => b.bookings - a.bookings || a.code.localeCompare(b.code));
 
-    // Local rental totals are upcoming confirmed visits only. Past and pending bookings stay out.
+    // Rentals are still to be issued, so only upcoming confirmed visits count.
+    // Houbara, rabbits, and gazelles are consumed, so past and future confirmed visits both count.
+    const confirmedVisits = allReserved.filter((r) => r.status === 'CONFIRMED');
     const rentalSource = campsiteId
-      ? allReserved.filter((r) => r.status === 'CONFIRMED' && !isVisitPast(r.startDate, r.endDate))
+      ? confirmedVisits.filter((r) => !isVisitPast(r.startDate, r.endDate))
       : allReserved;
+    const consumableSource = campsiteId ? confirmedVisits : allReserved;
 
     const stats = {
       totalActiveReservations: allReserved.length,
@@ -131,10 +134,10 @@ export async function GET(request: NextRequest) {
       rentedCars: rentalSource.reduce((acc, r) => acc + (r.rentedCars || 0), 0),
       rentedTents: rentalSource.reduce((acc, r) => acc + (r.rentedTents || 0), 0),
       rentedBirds: rentalSource.reduce((acc, r) => acc + (r.rentedBirds || 0), 0),
-      rentedHoubara: rentalSource.reduce((acc, r) => acc + (r.rentedHoubara || 0), 0),
-      rentedRabbits: rentalSource.reduce((acc, r) => acc + (r.rentedRabbits || 0), 0),
       rentedSalukis: rentalSource.reduce((acc, r) => acc + (r.rentedSalukis || 0), 0),
-      rentedGazelles: rentalSource.reduce((acc, r) => acc + (r.rentedGazelles || 0), 0),
+      rentedHoubara: consumableSource.reduce((acc, r) => acc + (r.rentedHoubara || 0), 0),
+      rentedRabbits: consumableSource.reduce((acc, r) => acc + (r.rentedRabbits || 0), 0),
+      rentedGazelles: consumableSource.reduce((acc, r) => acc + (r.rentedGazelles || 0), 0),
       pendingCount: allReserved.filter((r) => r.status === 'PENDING').length,
       confirmedCount: allReserved.filter((r) => r.status === 'CONFIRMED').length,
       cancelledCount,
