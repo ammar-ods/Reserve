@@ -81,21 +81,21 @@ export default function StatsBar({ stats, title, variant = 'site', campsiteSlug 
       </div>
 
       {variant === 'site' && (
-        <div className="stats-countries">
+        <div className="stats-upcoming">
           <span className="stats-countries-label">{t('stats.upcomingConsumables')}</span>
-          <div className="stats-row" style={{ marginTop: 0 }}>
-            <div className="stat-item">
-              <span className="stat-item-value">{stats.upcomingHoubara || 0}</span>
-              <span className="stat-item-label">{t('stats.houbara')}</span>
-            </div>
-            <div className="stat-item">
-              <span className="stat-item-value">{stats.upcomingRabbits || 0}</span>
-              <span className="stat-item-label">{t('stats.rabbits')}</span>
-            </div>
-            <div className="stat-item">
-              <span className="stat-item-value">{stats.upcomingGazelles || 0}</span>
-              <span className="stat-item-label">{t('stats.gazelles')}</span>
-            </div>
+          <div className="stats-upcoming-items">
+            <span className="stats-upcoming-item">
+              <span className="stats-upcoming-value">{stats.upcomingHoubara || 0}</span>
+              <span className="stats-upcoming-label">{t('stats.houbara')}</span>
+            </span>
+            <span className="stats-upcoming-item">
+              <span className="stats-upcoming-value">{stats.upcomingRabbits || 0}</span>
+              <span className="stats-upcoming-label">{t('stats.rabbits')}</span>
+            </span>
+            <span className="stats-upcoming-item">
+              <span className="stats-upcoming-value">{stats.upcomingGazelles || 0}</span>
+              <span className="stats-upcoming-label">{t('stats.gazelles')}</span>
+            </span>
           </div>
         </div>
       )}
