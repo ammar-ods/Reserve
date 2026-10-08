@@ -79,6 +79,26 @@ export default function StatsBar({ stats, title, variant = 'site', campsiteSlug 
           </div>
         )}
       </div>
+
+      {variant === 'site' && (
+        <div className="stats-countries">
+          <span className="stats-countries-label">{t('stats.upcomingConsumables')}</span>
+          <div className="stats-row" style={{ marginTop: 0 }}>
+            <div className="stat-item">
+              <span className="stat-item-value">{stats.upcomingHoubara || 0}</span>
+              <span className="stat-item-label">{t('stats.houbara')}</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-item-value">{stats.upcomingRabbits || 0}</span>
+              <span className="stat-item-label">{t('stats.rabbits')}</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-item-value">{stats.upcomingGazelles || 0}</span>
+              <span className="stat-item-label">{t('stats.gazelles')}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

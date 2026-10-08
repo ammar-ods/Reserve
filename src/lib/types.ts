@@ -126,6 +126,9 @@ export interface StatsData {
   rentedRabbits: number;
   rentedSalukis: number;
   rentedGazelles: number;
+  upcomingHoubara: number;
+  upcomingRabbits: number;
+  upcomingGazelles: number;
   pendingCount: number;
   confirmedCount: number;
   cancelledCount: number;
