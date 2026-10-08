@@ -61,6 +61,7 @@ export const TRANSLATIONS: Record<string, { ar: string; en: string }> = {
   'stats.rabbits': { ar: 'الأرانب البرية', en: 'Wild rabbits' },
   'stats.deposits': { ar: 'العرابين المستلمة', en: 'Deposits received' },
   'stats.countries': { ar: 'دول الزوار', en: 'Visitor countries' },
+  'stats.upcomingConsumables': { ar: 'المستهلكات للحجوزات القادمة', en: 'Consumables for upcoming bookings' },
   'stats.countryBookings': { ar: 'حجوزات', en: 'bookings' },
   'stats.countryVisitors': { ar: 'زوار', en: 'visitors' },
   'stats.noCountries': { ar: 'لا توجد بيانات', en: 'No data yet' },

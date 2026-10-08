@@ -361,6 +361,42 @@ input:focus, select:focus, textarea:focus {
   line-height: 1.25;
 }
 
+.stats-upcoming {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.9rem;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.stats-upcoming-items {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.15rem;
+}
+
+.stats-upcoming-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+.stats-upcoming-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.stats-upcoming-label {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+}
+
 .page-title {
   font-size: 1.6rem;
   font-weight: 800;
